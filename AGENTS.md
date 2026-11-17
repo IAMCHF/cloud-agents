@@ -40,6 +40,9 @@ docs/                # 架构决策、实施计划、客户端对接说明
 - P2 再长 `control-plane/app/{auth,llm_gateway,scheduler}`；依赖与构建文件（pyproject.toml / package.json）随 P1 首个代码任务落地。
 - 内网 agent 客户端代码：`D:\ssd-projects\yice-agent`（本机路径；用户是客户端团队成员，本服务属同一团队，前端代码可直接拷贝复用；涉及客户端协议改动仍按 §2 先标出并征得同意）。
 - 先搜再写；配置/类型/常量各一个权威文件；密钥走环境变量，禁止硬编码路径/URL。
+- 抽象纪律：抽象必须绑定当前消费者；公开选择（默认值/外部概念）要有证据；共享状态必须有属主，不新增全局单例。
+- 依赖锁定（uv.lock / pnpm-lock.yaml）；不引带 install 脚本的依赖。
+- 测试分层与门禁（覆盖率/jscpd/pre-commit/Playwright 金路径，无手测）见 `docs/实施计划.md` §5–6；模块级 AGENTS.md 随 T1 落地。
 - 构建/测试/检查命令：`[P1 脚手架落地后填写]`；完成前必须全绿，未跑写明原因。
 
 ## 4. 职责边界与敏感素材【硬约束】

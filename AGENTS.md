@@ -29,7 +29,7 @@ control-plane/       # Python + FastAPI；认证/租户/调度/LLM 网关/WSS �
 web/                 # React + TypeScript SPA（Vite）
   src/rpc/           # WSS JSON-RPC 客户端
   src/features/      # 对话流/审批；P3 补 diff/任务列表/终端/文件树
-  src/codex/         # generate-ts 协议绑定（入库 + CI 校验漂移）
+  src/codex/         # 协议绑定：generate-json-schema → TS（入库 + CI 校验漂移）
 sandbox/
   images/            # 镜像模板：pin codex + bridge + 工具链，非 root
   opensandbox/       # OpenSandbox 配置
@@ -37,7 +37,7 @@ sandbox/
 docs/                # 架构决策、实施计划、客户端对接说明
 ```
 
-- P2 再长 `control-plane/app/{auth,llm_gateway,scheduler}`；依赖与构建文件（pyproject.toml / package.json）随 P1 首个代码任务落地。
+- P1 长 `control-plane/app/llm_gateway`（最小 SSE 转发，无计量）；P2 长 `app/{auth,scheduler}` 与网关计量/配额；依赖与构建文件（pyproject.toml / package.json）随 P1 首个代码任务落地。
 - 内网 agent 客户端代码：`D:\ssd-projects\yice-agent`（本机路径；用户是客户端团队成员，本服务属同一团队，前端代码可直接拷贝复用；涉及客户端协议改动仍按 §2 先标出并征得同意）。
 - 先搜再写；配置/类型/常量各一个权威文件；密钥走环境变量，禁止硬编码路径/URL。
 - 抽象纪律：抽象必须绑定当前消费者；公开选择（默认值/外部概念）要有证据；共享状态必须有属主，不新增全局单例。

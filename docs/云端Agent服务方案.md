@@ -39,7 +39,7 @@ Web 前端（同一协议的渲染层，SSE/WSS）──────┘         
 | Agent 引擎 | codex app-server（原版二进制，版本固定） | Apache-2.0 | 2026-08 官方定位为平台层，协议文档化；thread/turn/item、审批回调、resume/fork、自定义 model_providers 均已核实（[app-server README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)） |
 | 沙箱基础设施 | OpenSandbox（Docker 运行时起步，K8s 演进） | Apache-2.0 | 阿里内部生产日均百万级沙箱；2026-10 被 AAIF 收录（[报道](https://m.toutiao.com/article/7700873824409092623/)）；暂停/恢复、egress 白名单、Ingress 预览、execd 终端/文件 API 原生自带；**Docker 模式无 KVM 依赖** |
 | 控制面 | 自建（Python + FastAPI）：Web 服务 + WSS/SSE 网关 + 会话调度器 + LLM 网关 + Postgres | — | 认证(OIDC)/租户/RBAC/配额/审计；网关薄代理 JSON-RPC，不发明新协议 |
-| Web 前端 | React SPA（TypeScript），消费 `codex app-server generate-ts` 生成的类型绑定 | — | 对话流/diff/审批/任务列表；终端(xterm.js+execd)、文件树、应用预览分期上 |
+| Web 前端 | React SPA（TypeScript），消费 `codex app-server generate-json-schema` → json-schema-to-typescript 生成的类型绑定（与客户端同流程） | — | 对话流/diff/审批/任务列表；终端(xterm.js+execd)、文件树、应用预览分期上 |
 | 模型 | 内网现有模型服务，经 LLM 网关按租户计量转发 | — | 沙箱内 codex 的 model_providers 指向网关；真 key 只在网关 |
 
 明确不选：Daytona（2026-06 闭源归档）、LobeChat 云沙箱（不开源）、Open WebUI 去品牌部署（许可越线）、仿冒 Codex Cloud 私有后端（闭源协议，随时失效）、E2B（自托管栈重且 Firecracker 需 KVM/裸金属；若日后有裸金属+强运维可重评）。
@@ -53,7 +53,7 @@ Web 前端（同一协议的渲染层，SSE/WSS）──────┘         
 3. **预热池** 3–5 个预装工具链的空白沙箱，抵消冷启动；分配后挂卷 + 起 codex 进程。
 4. **凭据不进沙箱。** 沙箱内只有受限网关 token；审计/配额/断供在 LLM 网关一处实现。
 5. **协议即接口。** 对客户端和 Web 暴露原生 Codex JSON-RPC；控制面只做信封（认证/路由/审计）。传输用 stdio + 自建桥接，不用 app-server 实验性 WebSocket。
-6. **版本固定 + CI 协议校验。** pin codex 二进制版本，TS 绑定生成入 CI（VS Code 扩展同款做法）。
+6. **版本固定 + CI 协议校验。** pin codex 二进制版本；`app-server generate-json-schema` 产物入库，经 json-schema-to-typescript 生成 TS 绑定入 CI 漂移校验（2026-11-17 修正：generate-ts 在 codex 主仓查无实据，改用客户端已验证的 schema 流程）。
 7. **审批流。** `requestApproval` 转发前端/客户端弹窗；断线重连走协议原生审批重放；无人在线时按策略挂起或超时拒绝（可配）。
 
 ## 5. 客户端接入（给客户端团队的一页纸）
@@ -68,7 +68,7 @@ OpenSandbox 及一切服务端组件对客户端不可见。联动：同一控�
 ## 6. 安全基线
 
 - 容器：非 root、只读根文件系统、drop capabilities、cgroup 限额。
-- 网络：每沙箱 egress 默认全拒，白名单仅 LLM 网关 / 内部 git / 包镜像；预览 Ingress 带会话级鉴权（仅属主可访问）。
+- 网络：每沙箱 egress 默认全拒，白名单仅**控制面 WSS 端点（桥接回连）**/ LLM 网关 / 内部 git / 包镜像；预览 Ingress 带会话级鉴权（仅属主可访问）。
 - 数据：每用户独立卷，挂载校验属主；沙箱销毁不删卷。
 - 隔离强度：内网认证员工威胁模型下容器级起步，需加强上 gVisor（无 KVM 依赖）；不上 Kata/microVM（内网 VM 无嵌套虚拟化）。
 - 审计：控制面落盘全部会话事件与审批记录。
@@ -82,6 +82,8 @@ OpenSandbox 及一切服务端组件对客户端不可见。联动：同一控�
 | OpenSandbox 开源版年轻（server 0.x） | 生命周期 API 是边界，可整体替换为裸 Docker/K8s，不影响客户端与前端 |
 | 内网模型并发容量不足 | 立项前先与模型服务方对容量；网关侧排队/限流兜底 |
 | 审批无人响应阻塞任务 | 策略可配：挂起等待 / 超时拒绝；IM 通知（企业微信/钉钉） |
+| codex 状态库（SQLite）在 NFS 用户卷上的锁兼容性 | P1 PoC 实测；不可行则状态盘本地化 + 卷归档（P3）或换卷方案 |
+| P1 无租户配额时并发打爆内存 | 全局 max_active_sessions 准入兜底（P1）；租户配额 P2 |
 
 ## 8. 备选路线备忘
 

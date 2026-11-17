@@ -1,0 +1,87 @@
+# 依赖 / 构建输出 / 缓存
+node_modules/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.vite/
+.eslintcache
+.pnpm-store/
+.cache/
+
+# 环境与密钥（禁止提交 .env；模板 .env.example 除外）
+.env
+.env.*
+!.env.example
+
+# 本地运行时数据（数据库、沙箱卷、日志）
+data/
+volumes/
+logs/
+*.log
+*.pid
+*.sqlite
+*.sqlite3
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时文件
+tmp/
+.tmp/
+*.tmp
+
+# AI 编码助手 / Agent 的工作记忆与本地状态（不入库）
+.workbuddy/
+.dsh/
+.trae/
+.claude/
+.codex/
+.qoder/
+
+# Python（control-plane）
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+*.egg
+.Python
+
+# Python 测试 / 类型检查 / lint 缓存与覆盖率
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# 密钥 / 凭据文件
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig
+*.kubeconfig
+.kube/config
+
+# 仅在本地保留、不纳入版本库的项目文件与文档
+/AGENTS.md
+/模板AGENTS.md
+/.gitattributes
+/docs/

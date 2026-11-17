@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from app.bridge.entry import BridgeConfig
+from app.bridge.entry import BridgeConfig, _prepare_codex_home
 
 
 def test_config_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,3 +51,33 @@ def test_config_requires_control_plane_url(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(SystemExit):
         BridgeConfig.from_env()
+
+
+def test_prepare_codex_home_writes_provider_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://cp:8000/llm/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "session-token")
+    monkeypatch.setenv("CODEX_MODEL", "internal-codex")
+    monkeypatch.delenv("LLM_WIRE_API", raising=False)
+
+    _prepare_codex_home()
+
+    content = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    assert 'model = "internal-codex"' in content
+    assert 'base_url = "http://cp:8000/llm/v1"' in content
+    assert 'env_key = "OPENAI_API_KEY"' in content
+    assert 'wire_api = "responses"' in content
+    assert "session-token" not in content
+
+
+def test_prepare_codex_home_is_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://cp:8000/llm/v1")
+    config = tmp_path / "config.toml"
+    config.write_text("# operator managed\n", encoding="utf-8")
+
+    _prepare_codex_home()
+
+    assert config.read_text(encoding="utf-8") == "# operator managed\n"

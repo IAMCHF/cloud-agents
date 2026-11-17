@@ -1,0 +1,28 @@
+# opensandbox-server 配置示例（Docker 运行时）
+# 用法：由用户复制到执行机（如 ~/.sandbox.toml）并按部署替换 <...> 占位；仓库内不存真实密钥。
+# 权威字段见 OpenSandbox `server/configuration.md`，本文件只保留 P1 需要的项。
+
+[server]
+host = "0.0.0.0"
+port = 8080
+api_key = "<OPEN_SANDBOX_API_KEY>"   # 与控制面 OPEN_SANDBOX_API_KEY 一致
+eip = "<执行机可达地址>"              # 返回给控制面的 endpoint 主机部分
+max_sandbox_timeout_seconds = 7200   # 上限；控制面默认申请 3600
+
+[runtime]
+type = "docker"
+execd_image = "<execd 镜像:pin>"      # 必填，按部署 pin 版本
+
+[docker]
+network_mode = "bridge"              # networkPolicy / egress sidecar 需要 bridge
+publish_host = "127.0.0.1"           # 端口不暴露到公网接口
+no_new_privileges = true
+pids_limit = 4096
+
+[storage]
+# host 卷挂载白名单：留空等于拒绝所有 host 挂载（安全默认）。
+# 控制面 WORKSPACE_HOST_ROOT 必须落在此前缀下，否则创建沙箱会被拒。
+allowed_host_paths = ["/srv/cloud-agents/volumes"]
+
+[log]
+level = "INFO"

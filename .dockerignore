@@ -1,0 +1,11 @@
+.git
+.gitignore
+.github
+.workbuddy
+node_modules
+**/node_modules
+.venv
+**/.venv
+web
+docs
+*.md

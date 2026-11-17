@@ -1,0 +1,17 @@
+# P1 egress 白名单（OpenSandbox networkPolicy 示例，随创建请求下发）
+# 四类放行：控制面 WSS、LLM 网关、内部 git、包镜像；其余默认拒绝。
+# 说明：目标必须替换为部署实际域名/CIDR；不要在仓库写内网真实地址。
+defaultAction: deny
+egress:
+  - action: allow
+    target: "<控制面域名>"
+  - action: allow
+    target: "<LLM 网关域名>"
+  - action: allow
+    target: "<内部 git 域名>"
+  - action: allow
+    target: "<包镜像域名>"
+
+# 实施注意：
+# - Docker 运行时需 network_mode = "bridge" 且配置 [egress] sidecar，否则 networkPolicy 不生效（P4 全量策略前先核实）。
+# - codex 自身外联（auth/telemetry/更新检查）不应在放行名单内，由默认 deny 兜底。

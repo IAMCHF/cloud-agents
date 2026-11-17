@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from starlette.websockets import WebSocket
@@ -38,14 +39,20 @@ class SessionChannel:
 class SessionHub:
     def __init__(self) -> None:
         self._channels: dict[str, SessionChannel] = {}
+        self._tokens: dict[str, str] = {}  # token -> session_id（LLM 网关鉴权用）
+        # 桥接断开回调：由生命周期管理器注入，用于判定沙箱是否已退出。
+        self.on_bridge_detached: Callable[[str], Awaitable[None]] | None = None
 
     def create(self, session_id: str, token: str, owner: str) -> SessionChannel:
         channel = SessionChannel(session_id=session_id, token=token, owner=owner)
         self._channels[session_id] = channel
+        self._tokens[token] = session_id
         return channel
 
     def remove(self, session_id: str) -> None:
-        self._channels.pop(session_id, None)
+        channel = self._channels.pop(session_id, None)
+        if channel is not None:
+            self._tokens.pop(channel.token, None)
 
     def get(self, session_id: str) -> SessionChannel | None:
         return self._channels.get(session_id)
@@ -57,6 +64,15 @@ class SessionHub:
         if not hmac.compare_digest(channel.token, token):
             return None
         return channel
+
+    def authorize_token(self, token: str) -> SessionChannel | None:
+        """按 token 反查会话（LLM 网关：沙箱只有会话 token，没有会话 ID）。"""
+        if not token:
+            return None
+        session_id = self._tokens.get(token)
+        if session_id is None:
+            return None
+        return self._channels.get(session_id)
 
     async def attach_bridge(self, channel: SessionChannel, websocket: WebSocket) -> bool:
         if channel.bridge is not None and channel.bridge is not websocket:
@@ -70,6 +86,12 @@ class SessionHub:
         if channel.bridge is websocket:
             channel.bridge = None
             logger.info("会话 %s 桥接已断开", channel.session_id)
+            callback = self.on_bridge_detached
+            if callback is not None:
+                try:
+                    await callback(channel.session_id)
+                except Exception:
+                    logger.exception("桥接断开回调失败：%s", channel.session_id)
 
     async def attach_client(self, channel: SessionChannel, websocket: WebSocket) -> bool:
         if channel.client is not None and channel.client is not websocket:

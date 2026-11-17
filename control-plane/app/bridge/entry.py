@@ -21,6 +21,7 @@ import signal
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import quote
 
 from websockets.asyncio.client import ClientConnection, connect
@@ -63,6 +64,35 @@ class BridgeConfig:
         return f"{self.control_plane_url}/ws/bridge/{self.session_id}?token={token}"
 
 
+def _prepare_codex_home() -> None:
+    """把模型 provider 指向控制面 LLM 网关；token 只经 env_key 引用，不落配置文件。"""
+    base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
+    if not base_url:
+        return
+    codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+    config_path = codex_home / "config.toml"
+    if config_path.exists():
+        return
+    codex_home.mkdir(parents=True, exist_ok=True)
+    lines = []
+    model = os.environ.get("CODEX_MODEL", "").strip()
+    if model:
+        lines.append(f'model = "{model}"')
+    lines.extend(
+        [
+            'model_provider = "cloud"',
+            "",
+            "[model_providers.cloud]",
+            'name = "cloud"',
+            f'base_url = "{base_url}"',
+            'env_key = "OPENAI_API_KEY"',
+            f'wire_api = "{os.environ.get("LLM_WIRE_API", "responses")}"',
+        ]
+    )
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    logger.info("已写入 codex provider 配置 %s", config_path)
+
+
 class _WebSocketConnection:
     def __init__(self, websocket: ClientConnection) -> None:
         self._websocket = websocket
@@ -89,6 +119,7 @@ class _WebSocketConnection:
 
 
 async def _run(config: BridgeConfig) -> int:
+    _prepare_codex_home()
     process = await CodexProcess.spawn(
         [config.codex_bin, *config.codex_args],
         cwd=config.workspace_dir,

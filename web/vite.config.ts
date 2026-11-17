@@ -13,6 +13,8 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
+      // 不清理历史报告：本机安全策略会拦截批量删除，且报告目录已在 .gitignore 中。
+      clean: false,
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/main.tsx"],
       thresholds: {

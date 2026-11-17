@@ -8,6 +8,8 @@
     "**/coverage/**",
     "**/.venv/**",
     "**/uv.lock",
-    "**/pnpm-lock.yaml"
+    "**/pnpm-lock.yaml",
+    "**/src/codex/schema/**",
+    "**/src/codex/generated/**"
   ]
 }

@@ -44,7 +44,7 @@ docs/                # 架构决策、实施计划、客户端对接说明
 - 抽象纪律：抽象必须绑定当前消费者；公开选择（默认值/外部概念）要有证据；共享状态必须有属主，不新增全局单例。
 - 依赖锁定（uv.lock / pnpm-lock.yaml，均在各自根）；根 `package.json` + `pnpm-workspace.yaml` 仅承载 workspace 与工具链（jscpd/聚合脚本），web 是 workspace 成员；带 install 脚本的依赖默认禁止，确需引入走白名单审批（如 pnpm onlyBuiltDependencies）。
 - 测试分层与门禁（覆盖率/jscpd/pre-commit/Playwright 金路径，无手测）见 `docs/实施计划.md` §5–6；模块级契约已落地：`control-plane/AGENTS.md`、`web/AGENTS.md`。
-- 构建/测试/检查命令（仓库根，聚合入口 `pnpm run check`）：控制面 `uv run --directory control-plane {ruff,mypy,pytest}`（首次 `uv sync --all-groups`）；web `pnpm -C web run {lint,typecheck,test:cov,build}`；克隆检测 `pnpm run check:dup`。首次克隆后 `pnpm install && pnpm run hooks:install` 启用 pre-commit（`.githooks/pre-commit` 调 `pnpm run check`）。完成前必须全绿，未跑写明原因。
+- 构建/测试/检查命令（仓库根，聚合入口 `pnpm run check`）：控制面 `uv run --directory control-plane {ruff,mypy,pytest}`（首次 `uv sync --all-groups`）；web `pnpm -C web run {lint,typecheck,test:cov,build}`；克隆检测 `pnpm run check:dup`；协议绑定 `pnpm codex:schema` 生成、`pnpm check:codex` 校验漂移（含在 `check` 内）。首次克隆后 `pnpm install && pnpm run hooks:install` 启用 pre-commit（`.githooks/pre-commit` 调 `pnpm run check`）。完成前必须全绿，未跑写明原因。
 
 ## 4. 职责边界与敏感素材【硬约束】
 

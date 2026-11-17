@@ -14,7 +14,7 @@ React 19 + TypeScript + Vite + Tailwind CSS 4 + @assistant-ui/react + Zustand。
 
 - `src/rpc/` WSS JSON-RPC 客户端（T5）
 - `src/features/` 对话流/审批/resume（T5）；diff/终端/文件树 P3
-- `src/codex/` 协议绑定产物（T2）
+- `src/codex/` 协议绑定产物（T2）：`schema/` 为 pin 版本 codex 的原始 JSON，`generated/` 为 json-schema-to-typescript 输出，两者**均由 `pnpm codex:schema` 生成、禁止手改**；漂移由 `pnpm check:codex` 拦截。
 - `src/App.tsx` 当前为 P1 脚手架占位壳，T5 整体替换
 
 ## 检查命令

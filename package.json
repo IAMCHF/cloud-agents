@@ -7,13 +7,17 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "pnpm run check:cp && pnpm run check:web && pnpm run check:dup",
+    "check": "pnpm run check:cp && pnpm run check:web && pnpm run check:dup && pnpm run check:codex",
     "check:cp": "uv run --directory control-plane ruff check . && uv run --directory control-plane ruff format --check . && uv run --directory control-plane mypy . && uv run --directory control-plane pytest",
     "check:web": "pnpm -C web run lint && pnpm -C web run typecheck && pnpm -C web run test:cov",
     "check:dup": "jscpd --config .jscpd.json .",
+    "check:codex": "node scripts/codex-schema.mjs --check",
+    "codex:schema": "node scripts/codex-schema.mjs",
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "jscpd": "^5.4.3"
+    "@openai/codex": "0.167.0",
+    "jscpd": "^5.4.3",
+    "json-schema-to-typescript": "16.0.0"
   }
 }

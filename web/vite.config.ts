@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["./src/test/setup.ts"],
     coverage: {
       provider: "v8",
@@ -16,7 +17,13 @@ export default defineConfig({
       // 不清理历史报告：本机安全策略会拦截批量删除，且报告目录已在 .gitignore 中。
       clean: false,
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/main.tsx"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/test/**",
+        "src/main.tsx",
+        "src/codex/generated/**",
+        "src/codex/schema/**",
+      ],
       thresholds: {
         lines: 80,
         functions: 80,

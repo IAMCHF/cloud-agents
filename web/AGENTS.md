@@ -25,6 +25,7 @@ pnpm -C web run lint        # Biome
 pnpm -C web run typecheck   # tsc --noEmit
 pnpm -C web run test:cov    # Vitest + 覆盖率门槛 80%
 pnpm -C web run build       # tsc + vite build
+pnpm -C web run e2e         # Playwright 金路径（msedge channel，自带 mock 后端：控制面+桥接+fake codex）
 ```
 
 仓库根 `pnpm run check:web` 等价 lint/类型/测试三步。

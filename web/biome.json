@@ -1,7 +1,15 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
   "files": {
-    "includes": ["**", "!dist", "!coverage", "!src/codex/schema", "!src/codex/generated"]
+    "includes": [
+      "**",
+      "!dist",
+      "!coverage",
+      "!playwright-report",
+      "!test-results",
+      "!src/codex/schema",
+      "!src/codex/generated"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -13,6 +21,11 @@
     "enabled": true,
     "rules": {
       "preset": "recommended"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
     }
   },
   "javascript": {

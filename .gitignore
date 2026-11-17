@@ -79,3 +79,6 @@ htmlcov/
 kubeconfig
 *.kubeconfig
 .kube/config
+# Playwright
+playwright-report/
+test-results/

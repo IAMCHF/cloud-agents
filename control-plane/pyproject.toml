@@ -45,6 +45,8 @@ ignore = ["RUF001", "RUF002", "RUF003", "ASYNC109"]
 [tool.ruff.lint.per-file-ignores]
 # 测试里 `with pytest.raises(...)` 与 websocket 上下文嵌套能更清楚表达意图。
 "tests/**" = ["SIM117"]
+# E2E 启动脚本：uvicorn 未暴露启动事件，只能轮询 started 标志。
+"tests/e2e/**" = ["ASYNC110"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

@@ -1,0 +1,13 @@
+# Windows 检出后仍可在企业 Linux 容器中直接使用 Bash 脚本。
+templates/html-frontend/*.sh text eol=lf
+templates/html-frontend/scripts/*.sh text eol=lf
+sites-mcp/assets/runtime/*.sh text eol=lf
+sites-plugin/mcp/assets/runtime/*.sh text eol=lf
+sites-plugin/mcp/templates/html-frontend/*.sh text eol=lf
+sites-plugin/mcp/templates/html-frontend/scripts/*.sh text eol=lf
+# 原始构建归档及许可保留上游字节，不转换换行或检查上游许可的空白。
+build-resources/python/*.tar.gz binary
+build-resources/python/LICENSE.txt -text -whitespace
+# cmd.exe 解析 LF 结尾的 UTF-8 批处理在 chcp 65001 后会偏移错位，Windows 批处理必须保持 CRLF。
+*.cmd text eol=crlf
+*.bat text eol=crlf

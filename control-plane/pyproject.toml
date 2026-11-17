@@ -37,6 +37,13 @@ src = ["app", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "ASYNC", "RUF"]
+# RUF001–003：中文注释/文档字符串使用全角标点，属预期写法。
+# ASYNC109：超时参数用于有界等待与进程清理，函数内部已用 wait_for 实现。
+ignore = ["RUF001", "RUF002", "RUF003", "ASYNC109"]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里 `with pytest.raises(...)` 与 websocket 上下文嵌套能更清楚表达意图。
+"tests/**" = ["SIM117"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
@@ -67,6 +74,8 @@ addopts = [
 [tool.coverage.run]
 source = ["app"]
 branch = true
+# 进程启动壳：真实逻辑在 entry.py，本文件只被集成测试以子进程方式执行（覆盖率统计不到子进程）。
+omit = ["app/bridge/__main__.py"]
 
 [tool.coverage.report]
 show_missing = true

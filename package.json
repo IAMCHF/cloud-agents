@@ -1,0 +1,19 @@
+{
+  "name": "cloud-agents",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "pnpm run check:cp && pnpm run check:web && pnpm run check:dup",
+    "check:cp": "uv run --directory control-plane ruff check . && uv run --directory control-plane ruff format --check . && uv run --directory control-plane mypy . && uv run --directory control-plane pytest",
+    "check:web": "pnpm -C web run lint && pnpm -C web run typecheck && pnpm -C web run test:cov",
+    "check:dup": "jscpd --config .jscpd.json .",
+    "hooks:install": "git config core.hooksPath .githooks"
+  },
+  "devDependencies": {
+    "jscpd": "^5.4.3"
+  }
+}

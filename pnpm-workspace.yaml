@@ -1,0 +1,6 @@
+packages:
+  - web
+
+# pnpm 10 默认禁止依赖的 install 脚本；按项目规则只放行确有需要且为常见原生包者。
+onlyBuiltDependencies:
+  - esbuild

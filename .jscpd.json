@@ -1,0 +1,13 @@
+{
+  "min-tokens": 50,
+  "threshold": 3,
+  "reporters": ["console"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/.venv/**",
+    "**/uv.lock",
+    "**/pnpm-lock.yaml"
+  ]
+}

@@ -38,11 +38,57 @@ Web 前端（同一协议的渲染层，SSE/WSS）──────┘         
 |---|---|---|---|
 | Agent 引擎 | codex app-server（原版二进制，版本固定） | Apache-2.0 | 2026-08 官方定位为平台层，协议文档化；thread/turn/item、审批回调、resume/fork、自定义 model_providers 均已核实（[app-server README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)） |
 | 沙箱基础设施 | OpenSandbox（Docker 运行时起步，K8s 演进） | Apache-2.0 | 阿里内部生产日均百万级沙箱；2026-10 被 AAIF 收录（[报道](https://m.toutiao.com/article/7700873824409092623/)）；暂停/恢复、egress 白名单、Ingress 预览、execd 终端/文件 API 原生自带；**Docker 模式无 KVM 依赖** |
-| 控制面 | 自建：Web 服务 + WSS/SSE 网关 + 会话调度器 + LLM 网关 + Postgres | — | 认证(OIDC)/租户/RBAC/配额/审计；网关薄代理 JSON-RPC，不发明新协议 |
-| Web 前端 | React SPA，消费 `codex app-server generate-ts` 生成的类型绑定 | — | 对话流/diff/审批/任务列表；终端(xterm.js+execd)、文件树、应用预览分期上 |
+| 控制面 | 自建（Python + FastAPI）：Web 服务 + WSS/SSE 网关 + 会话调度器 + LLM 网关 + Postgres | — | 认证(OIDC)/租户/RBAC/配额/审计；网关薄代理 JSON-RPC，不发明新协议 |
+| Web 前端 | React SPA（TypeScript），消费 `codex app-server generate-ts` 生成的类型绑定 | — | 对话流/diff/审批/任务列表；终端(xterm.js+execd)、文件树、应用预览分期上 |
 | 模型 | 内网现有模型服务，经 LLM 网关按租户计量转发 | — | 沙箱内 codex 的 model_providers 指向网关；真 key 只在网关 |
 
 明确不选：Daytona（2026-06 闭源归档）、LobeChat 云沙箱（不开源）、Open WebUI 去品牌部署（许可越线）、仿冒 Codex Cloud 私有后端（闭源协议，随时失效）、E2B（自托管栈重且 Firecracker 需 KVM/裸金属；若日后有裸金属+强运维可重评）。
+
+### 技术栈明细（2026-11-17 拍板）
+
+原则：全部 OSI 许可（Apache/MIT/BSD 优先），成熟生产验证；P1 只引最小集，按阶段引入。控制面 Python + FastAPI，Web React + TypeScript；UI 定 shadcn/ui + Tailwind，Python 包管理定 uv。
+
+**控制面（Python ≥3.12）**
+
+| 用途 | 选型 | 许可 | 阶段 |
+|---|---|---|---|
+| HTTP/WSS 入口 | FastAPI + uvicorn（WebSocket 用 Starlette 原生） | MIT / BSD-3 | P1 |
+| 配置/信封校验 | Pydantic v2 + pydantic-settings（密钥走环境变量） | MIT | P1 |
+| 异步 HTTP | httpx（LLM 网关流式转发 + OpenSandbox API） | BSD-3 | P1 |
+| 沙箱侧桥接 | websockets + asyncio subprocess（stdio↔WSS） | BSD-3 | P1 |
+| 台账/审计 | SQLAlchemy 2.0 async + asyncpg + Alembic | MIT / Apache-2.0 / MIT | P1 |
+| 租户/RBAC/配额 + OIDC | 同上库表 + Authlib | BSD-3 | P2 |
+| 埋点/日志 | prometheus-client + structlog（活跃率实测；审计落 Postgres） | Apache-2.0 / MIT·Apache | P1 |
+| 调度 | 进程内 asyncio + Postgres 台账，不引 Celery/Redis | — | P1；P2 HA 再评 |
+| 工程化 | uv + Ruff + mypy + pytest / pytest-asyncio | MIT·Apache / MIT / MIT / MIT·Apache | P1 |
+
+LLM 网关对沙箱暴露 OpenAI 兼容接口（codex `model_providers` 原生支持），真 key 只在网关；内网模型服务适配按实际协议定（对接由用户操作）。
+
+**Web（React 19 + TypeScript）**
+
+| 用途 | 选型 | 许可 | 阶段 |
+|---|---|---|---|
+| 构建/包管理 | Vite + pnpm | MIT | P1 |
+| 协议类型 | codex `generate-ts` 绑定入库 + CI 漂移校验 | Apache-2.0 | P1 |
+| 状态 | Zustand（WSS 事件驱动）；REST 增多再评 TanStack Query | MIT | P1 |
+| UI | Tailwind CSS + shadcn/ui（Radix） | MIT | P1 |
+| 消息渲染 | react-markdown + remark-gfm + Shiki | MIT | P1 |
+| 测试 | Vitest + Testing Library；Playwright 金路径 E2E | MIT / Apache-2.0 | P1 |
+| Lint/format | Biome | MIT | P1 |
+| diff 视图 | Monaco / CodeMirror 6（届时拍板） | MIT | P3 |
+| 终端/文件树 | xterm.js + execd；文件树自绘 | MIT | P3 |
+
+**沙箱 / 镜像 / 数据 / 部署**
+
+| 层 | 选型 | 许可 | 阶段 |
+|---|---|---|---|
+| 沙箱 | OpenSandbox Docker 模式（生命周期 API 保持可替换边界） | Apache-2.0 | P1 |
+| 镜像 | Debian slim 多阶段 + pin digest；Python + Node LTS + git；codex 二进制 pin；非 root / 只读 rootfs / cgroup 限额 | DFSG | P1 |
+| 编排 | Docker Engine + Compose（P1 单机） | Apache-2.0 | P1 |
+| 数据库 | Postgres 17；用户卷 NAS/NFS | PostgreSQL License | P1 |
+| 加固 | gVisor（可选） | Apache-2.0 | P4 |
+
+**不引 / 缓议**：Redis/Celery（P2 HA 再评）；客户端 shim 打包语言（P4，倾向 Go/Rust 单二进制，P1 不引第二语言）；K8s（P4）；OpenTelemetry（P2 可选）。禁止项见 §2：不自研 agent loop、不 fork codex、不发明新协议、不用实验性 WS 传输。
 
 ## 4. 关键设计决策
 

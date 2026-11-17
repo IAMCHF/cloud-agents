@@ -79,9 +79,3 @@ htmlcov/
 kubeconfig
 *.kubeconfig
 .kube/config
-
-# 仅在本地保留、不纳入版本库的项目文件与文档
-/AGENTS.md
-/模板AGENTS.md
-/.gitattributes
-/docs/

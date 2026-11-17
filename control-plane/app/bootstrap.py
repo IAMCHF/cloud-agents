@@ -8,6 +8,7 @@ from app.bridge.hub import SessionHub
 from app.config import Settings
 from app.ledger import Database, Ledger
 from app.llm_gateway import LlmGateway
+from app.metrics import Metrics
 from app.sandbox import OpenSandboxClient, SandboxManager
 
 
@@ -20,6 +21,7 @@ class Components:
     client: OpenSandboxClient
     manager: SandboxManager
     gateway: LlmGateway
+    metrics: Metrics
 
     async def aclose(self) -> None:
         self.hub.on_bridge_detached = None
@@ -39,11 +41,13 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     )
     manager = SandboxManager(settings=settings, hub=hub, ledger=ledger, client=client)
     hub.on_bridge_detached = manager.on_bridge_detached
+    metrics = Metrics()
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,
         api_key=settings.llm_api_key,
         hub=hub,
         timeout=settings.llm_timeout_seconds,
+        metrics=metrics,
     )
     return Components(
         settings=settings,
@@ -53,4 +57,5 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
         client=client,
         manager=manager,
         gateway=gateway,
+        metrics=metrics,
     )

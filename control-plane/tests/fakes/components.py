@@ -9,6 +9,7 @@ from app.bridge.hub import SessionHub
 from app.config import Settings
 from app.ledger import Database, Ledger
 from app.llm_gateway import LlmGateway
+from app.metrics import Metrics
 from app.sandbox import OpenSandboxClient, SandboxManager
 from tests.fakes.opensandbox import FakeOpenSandbox
 
@@ -36,11 +37,13 @@ async def build_test_components(
         client=client,
         detach_settle_seconds=0,
     )
+    metrics = Metrics()
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,
         api_key=settings.llm_api_key,
         hub=hub,
         transport=llm_transport,
+        metrics=metrics,
     )
     return Components(
         settings=settings,
@@ -50,4 +53,5 @@ async def build_test_components(
         client=client,
         manager=manager,
         gateway=gateway,
+        metrics=metrics,
     )

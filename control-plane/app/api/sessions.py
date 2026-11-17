@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.ledger import Ledger
+from app.metrics import Metrics
 from app.sandbox import AdmissionRejectedError, OpenSandboxError, SandboxManager
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -42,6 +43,11 @@ def _manager(request: Request) -> SandboxManager:
     return manager
 
 
+def _metrics(request: Request) -> Metrics | None:
+    metrics = getattr(request.app.state, "metrics", None)
+    return metrics if isinstance(metrics, Metrics) else None
+
+
 def _ledger(request: Request) -> Ledger:
     ledger = getattr(request.app.state, "ledger", None)
     if not isinstance(ledger, Ledger):
@@ -71,6 +77,9 @@ async def create_session(request: Request) -> SessionCreateResponse:
     try:
         handle = await manager.create_session(settings.p1_owner)
     except AdmissionRejectedError as exc:
+        metrics = _metrics(request)
+        if metrics is not None:
+            metrics.admission_rejections.labels(reason=exc.reason).inc()
         raise HTTPException(status_code=429, detail=exc.reason) from exc
     except OpenSandboxError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

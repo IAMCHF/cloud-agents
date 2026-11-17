@@ -12,6 +12,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from app.bridge.hub import SessionHub
+from app.metrics import Metrics
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,13 @@ class LlmGateway:
         hub: SessionHub,
         timeout: float = 600.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        metrics: Metrics | None = None,
     ) -> None:
         self._upstream_base_url = upstream_base_url.rstrip("/")
         self._api_key = api_key
         self._hub = hub
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport)
+        self._metrics = metrics
         self._requests = 0
 
     @property
@@ -79,6 +82,8 @@ class LlmGateway:
             params=request.query_params,
         )
         self._requests += 1
+        if self._metrics is not None:
+            self._metrics.llm_requests.inc()
         try:
             upstream_response = await self._client.send(upstream_request, stream=True)
         except httpx.HTTPError as exc:

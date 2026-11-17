@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/cloud_agents"
     audit_flush_interval_seconds: float = 0.2
 
+    # 浏览器跨域访问管理面/网关时按需放开（逗号分隔；默认不放开）。
+    cors_allow_origins: str = ""
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allow_origins.split(",") if origin.strip()]
+
     @property
     def websocket_base_url(self) -> str:
         if self.public_base_url.startswith("https://"):

@@ -1,0 +1,67 @@
+# P1 单机编排：Postgres 17 + 控制面 + OpenSandbox（Docker 运行时）。
+# 用法（用户操作，AI 只给步骤与验收）：
+#   1. 复制仓库根 .env.example 为 .env，填 P1_AUTH_TOKEN / OPEN_SANDBOX_API_KEY / PUBLIC_BASE_URL / WORKSPACE_HOST_ROOT；
+#   2. 按执行机实际值改 deploy/opensandbox/sandbox.toml（从 sandbox/opensandbox/config.example.toml 复制，必填 execd_image 与 allowed_host_paths）；
+#   3. docker compose -f deploy/compose.yaml --env-file .env up -d --build
+#   4. 验收：GET /healthz = ok；GET /metrics 可见 cloud_agents_active_sessions。
+name: cloud-agents
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cloud_agents}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  control-plane:
+    build:
+      context: ..
+      dockerfile: control-plane/Dockerfile
+    env_file:
+      # 模板允许缺省；实际部署用 --env-file .env 注入。
+      - path: ../.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_agents}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 15"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  opensandbox:
+    # P1 模板：跑官方 server 包，需要宿主机 Docker socket 创建沙箱容器。
+    image: python:3.12-slim
+    command: >
+      sh -c "pip install --no-cache-dir opensandbox-server &&
+             opensandbox-server --config /config/sandbox.toml"
+    environment:
+      OPEN_SANDBOX_API_KEY: ${OPEN_SANDBOX_API_KEY:?请在 .env 设置 OPEN_SANDBOX_API_KEY}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 配置文件由部署方从 sandbox/opensandbox/config.example.toml 复制并填实，路径写在 .env。
+      - ${SANDBOX_CONFIG_PATH:?请在 .env 设置 SANDBOX_CONFIG_PATH}:/config/sandbox.toml:ro
+      - ${WORKSPACE_HOST_ROOT:?请在 .env 设置 WORKSPACE_HOST_ROOT}:${WORKSPACE_HOST_ROOT}
+    ports:
+      - "8080:8080"
+    # 说明：沙箱容器需能回连控制面（PUBLIC_BASE_URL）；单机 compose 下通常指宿主机地址，
+    # 跨网络场景需按部署调整该变量与 egress 放行。
+
+volumes:
+  pgdata:

@@ -1,6 +1,6 @@
 # 云端 Agent 执行服务 — 方案规划
 
-日期：2026-11-17 ｜ 状态：已定稿，待 PoC
+日期：2026-11-17 ｜ 状态：已定稿（2026-11-17 评审修订），待 PoC
 
 ## 1. 目标与产品形态
 
@@ -8,7 +8,7 @@
 
 - 本地客户端与 Web 共用同一套 Agent 界面与任务台账，用户只切换"本地 / 云端执行"。
 - 云端按**活跃会话**提供临时隔离工作区，整个 Agent（codex app-server）在沙箱内运行。
-- 网页发起的任务本地客户端可见可接管，反之亦然；关页任务继续跑，重开 resume。
+- 云端任务在网页与本地客户端两端可见可接管（本地执行的任务不上云台账）；关页任务继续跑，重开 resume。
 
 ## 2. 硬约束（选型否决项）
 
@@ -25,11 +25,11 @@
 ```
 本地客户端（Codex 协议，shim 或端点切换）──┐
                                           ├─→ 控制面 ─→ 执行机池
-Web 前端（同一协议的渲染层，SSE/WSS）──────┘              │
+Web 前端（同一协议的渲染层，WSS）──────────┘              │
                                           沙箱生命周期 API（OpenSandbox）
                                                          │
                               每活跃会话一个容器：codex app-server + stdio↔WSS 桥接
-                              挂载用户卷（workspace + ~/.codex）；egress 白名单
+                              挂载用户卷（按会话隔离子目录：workspace + 状态）；egress 白名单
 ```
 
 ### 组件与选型依据
@@ -48,13 +48,13 @@ Web 前端（同一协议的渲染层，SSE/WSS）──────┘         
 
 ## 4. 关键设计决策
 
-1. **隔离单位 = 活跃会话，不是用户。** 计算与存储分离：用户卷持久化，容器只是临时计算壳。
-2. **逻辑冻结优先于物理休眠。** codex 全部状态在磁盘（rollout + workspace）：空闲 → 销毁容器保留卷；回来 → 预热池取新沙箱挂卷 + `thread/resume`，秒级恢复。仅"需保活 dev server 预览"的会话用 OpenSandbox 物理暂停/恢复。
-3. **预热池** 3–5 个预装工具链的空白沙箱，抵消冷启动；分配后挂卷 + 起 codex 进程。
-4. **凭据不进沙箱。** 沙箱内只有受限网关 token；审计/配额/断供在 LLM 网关一处实现。
-5. **协议即接口。** 对客户端和 Web 暴露原生 Codex JSON-RPC；控制面只做信封（认证/路由/审计）。传输用 stdio + 自建桥接，不用 app-server 实验性 WebSocket。
+1. **隔离单位 = 活跃会话，不是用户。** 计算与存储分离：用户卷持久化，容器只是临时计算壳。**活跃会话**指容器存活的会话（含跑 turn 与短暂空闲，空闲超时窗口 P3 定），密度模型按此口径埋点。**同用户多活跃会话**：卷内按会话隔离 workspace 与状态子目录，resume 挂对应会话目录，避免并发写同一 SQLite/工作区；P1 先以「同用户单活跃」准入兜底。
+2. **逻辑冻结优先于物理休眠。** codex 全部状态在磁盘（rollout + workspace）：空闲 → 销毁容器保留卷；回来 → 预热池取新沙箱挂卷 + `thread/resume` 恢复（「秒级」为假设，P1 做销毁→新沙箱挂卷→resume 冷恢复实验实测，含 NFS 上 SQLite 锁兼容性）。仅「需保活 dev server 预览」的会话用 OpenSandbox 物理暂停/恢复；**pause 语义待核实**（freezer 保内存 vs checkpoint 落盘），若保内存则保活会话须计入容量预算。
+3. **预热池** 3–5 个预装工具链的空白沙箱，抵消冷启动；分配后挂卷 + 起 codex 进程（P3 落地）。**依赖运行中热挂卷**，若 OpenSandbox 仅支持创建时挂载则池设计需调整，P1/P3 核实。
+4. **凭据不进沙箱。** 沙箱内只有受限网关 token；审计/配额/断供在 LLM 网关一处实现。网关 token/URL 经环境变量或 tmpfs 临时配置注入，**不写持久化用户卷**（避免落 NAS 且跨会话残留）；网关即便 P1 无计量也须校验会话 token。
+5. **协议即接口。** 任务执行协议对客户端和 Web 只用原生 Codex JSON-RPC；控制面只做信封（认证/路由/审计）。管理/辅助面 API（台账、休眠状态、execd 终端/文件、预览）另行定义并最小化。传输用 stdio + 自建桥接，不用 app-server 实验性 WebSocket。
 6. **版本固定 + CI 协议校验。** pin codex 二进制版本；`app-server generate-json-schema` 产物入库，经 json-schema-to-typescript 生成 TS 绑定入 CI 漂移校验（2026-11-17 修正：generate-ts 在 codex 主仓查无实据，改用客户端已验证的 schema 流程）。
-7. **审批流。** `requestApproval` 转发前端/客户端弹窗；断线重连走协议原生审批重放；无人在线时按策略挂起或超时拒绝（可配）。
+7. **审批流。** `requestApproval` 转发前端/客户端弹窗；断线重连的审批重放由桥接缓存 pending 请求实现（同沙箱重连时 bridge↔codex stdio 不断，pending 审批握在桥接手里；「app-server 原生重放」待核实）；无人在线时按策略挂起或超时拒绝（可配）。
 
 ## 5. 客户端接入（给客户端团队的一页纸）
 
@@ -63,27 +63,29 @@ Web 前端（同一协议的渲染层，SSE/WSS）──────┘         
 - **档位 A（零代码改动）**：提供 drop-in `codex` shim 二进制，stdio JSON-RPC 原样透传至云端 WSS。客户端只改二进制路径/配置。
 - **档位 B（小改动，体验更好）**：加"本地/云端"开关，云端时改连 WSS 端点，复用现有事件解析与渲染代码；可显示云端任务列表与休眠/恢复状态。
 
-OpenSandbox 及一切服务端组件对客户端不可见。联动：同一控制面会话台账 + 同一沙箱会话允许多客户端接入（app-server 原生支持）。
+OpenSandbox 及一切服务端组件对客户端不可见。联动：同一控制面会话台账；**先后接管**靠 `thread/resume`（原生），P1 即此形态、单客户端在线。**多客户端同时在线**需桥接做事件扇出 + 请求仲裁 + 审批路由（stdio 单管道，非 app-server 原生），列 P2+ 设计项并先核实。
 
 ## 6. 安全基线
 
 - 容器：非 root、只读根文件系统、drop capabilities、cgroup 限额。
-- 网络：每沙箱 egress 默认全拒，白名单仅**控制面 WSS 端点（桥接回连）**/ LLM 网关 / 内部 git / 包镜像；预览 Ingress 带会话级鉴权（仅属主可访问）。
+- 网络：每沙箱 egress 默认全拒，白名单仅**控制面 WSS 端点（桥接回连）**/ LLM 网关 / 内部 git / 包镜像（P1 即放行这四类，见实施计划）；预览 Ingress 带会话级鉴权（仅属主可访问）。codex 自身外联（auth/telemetry/更新检查）显式关闭，由默认全拒兜底。
 - 数据：每用户独立卷，挂载校验属主；沙箱销毁不删卷。
 - 隔离强度：内网认证员工威胁模型下容器级起步，需加强上 gVisor（无 KVM 依赖）；不上 Kata/microVM（内网 VM 无嵌套虚拟化）。
-- 审计：控制面落盘全部会话事件与审批记录。
+- 审计：控制面落盘全部会话事件与审批记录（批量/异步写入，吞吐见实施计划）；审计库集中全量提示词/代码，须最小权限访问 + 静态加密。
 
 ## 7. 风险与对策
 
 | 风险 | 对策 |
 |---|---|
-| app-server 协议迭代快、experimental 字段多 | 版本固定 + generate-ts 绑定 + CI 校验；只用稳定方法 |
-| 活跃率假设失真 | P1 埋点实测，机器按实测回调；执行池无状态横向扩 |
+| app-server 协议迭代快、experimental 字段多 | 版本固定 + generate-json-schema → json-schema-to-typescript 绑定 + CI 校验；只用稳定方法 |
+| 活跃率假设失真 | P1 交付埋点能力 + 模拟基准，真值上线后观测回调；执行池无状态横向扩 |
 | OpenSandbox 开源版年轻（server 0.x） | 生命周期 API 是边界，可整体替换为裸 Docker/K8s，不影响客户端与前端 |
 | 内网模型并发容量不足 | 立项前先与模型服务方对容量；网关侧排队/限流兜底 |
-| 审批无人响应阻塞任务 | 策略可配：挂起等待 / 超时拒绝；IM 通知（企业微信/钉钉） |
+| 审批无人响应阻塞任务 | 策略可配：挂起等待 / 超时拒绝；IM 通知须私有化部署或仅发不含任务内容的提醒（公网企业微信/钉钉与 C5 冲突） |
 | codex 状态库（SQLite）在 NFS 用户卷上的锁兼容性 | P1 PoC 实测；不可行则状态盘本地化 + 卷归档（P3）或换卷方案 |
-| P1 无租户配额时并发打爆内存 | 全局 max_active_sessions 准入兜底（P1）；租户配额 P2 |
+| P1 无租户配额时并发打爆内存 | 全局 max_active_sessions 准入兜底（P1，按总量预算取值，见实施计划 §2）；租户配额 P2。cgroup 硬限只限单沙箱、防不了总量超卖；OOM 被杀 ≈ 逻辑冻结，靠 resume 恢复（代价：打断进行中 turn） |
+| 同用户多活跃会话并发写同一卷 | 卷内会话级子目录隔离（目标态）；P1 同用户单活跃准入兜底 |
+| OpenSandbox Docker 模式能力不全（pause/egress/Ingress/execd 部分或仅 K8s） | P1 核实；生命周期 API 为可替换边界，回退裸 Docker 时相应能力需自实现 |
 
 ## 8. 备选路线备忘
 
@@ -94,5 +96,5 @@ OpenSandbox 及一切服务端组件对客户端不可见。联动：同一控�
 ## 附：关键事实来源
 
 - [Codex app-server 协议 README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) ｜ [Codex 开源边界](https://m.toutiao.com/a7676391925070479935/) ｜ [VS Code 集成模式](https://m.blog.csdn.net/gitblog_00887/article/details/156599082)
-- [OpenSandbox 阿里日均百万沙箱 / AAIF 收录](https://m.toutiao.com/article/7700873824409092623/) ｜ [OpenSandbox 架构详解](https://johng.cn/ai/opensandbox-alibaba-ai-sandbox-platform)
+- [OpenSandbox 阿里日均百万沙箱 / AAIF 收录](https://m.toutiao.com/article/7700873824409092623/) ｜ [OpenSandbox 架构详解](https://johng.cn/ai/opensandbox-alibaba-ai-sandbox-platform)（生产规模为二手报道，评审前宜补官方 repo/会议材料佐证；许可 Apache-2.0 以 repo 为准）
 - [Daytona 闭源归档公告](https://mygit.top/repository/753490180) ｜ [Codex Cloud 官方机制（闭源后端）](https://help.openai.com/zh-hans-cn/articles/11369540-using-codex-with-your-chatgpt-plan)

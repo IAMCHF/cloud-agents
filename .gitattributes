@@ -1,6 +1,7 @@
-# Shell 脚本在 Linux 沙箱内执行，统一 LF，避免 Windows 检出后带 CRLF。
-*.sh text eol=lf
+# 全仓库文本文件统一 LF（Linux/Unix 默认）：检出与提交都不做 CRLF 转换。
+# text=auto 让 Git 自动识别二进制文件，跳过换行处理。
+* text=auto eol=lf
 
-# cmd.exe 解析 LF 结尾的 UTF-8 批处理在 chcp 65001 后会偏移错位，Windows 批处理必须保持 CRLF。
+# 例外：cmd.exe 解析 LF 结尾的 UTF-8 批处理在 chcp 65001 后会偏移错位，Windows 批处理必须保持 CRLF。
 *.cmd text eol=crlf
 *.bat text eol=crlf

@@ -22,12 +22,22 @@
 ## 3. 目录契约（初始；新增目录先提方案）
 
 ```
-control-plane/   # 认证/租户/调度/LLM 网关/WSS 桥接
-web/             # React SPA，消费 codex generate-ts 类型绑定
-sandbox/         # 镜像模板、OpenSandbox 配置、egress 策略
-docs/            # 架构决策、客户端对接说明
+control-plane/       # Python + FastAPI；认证/租户/调度/LLM 网关/WSS 桥接
+  app/bridge/        # stdio↔WSS 桥接（沙箱侧进程 + 控制面端点）
+  app/sandbox/       # OpenSandbox 生命周期客户端
+  tests/
+web/                 # React + TypeScript SPA（Vite）
+  src/rpc/           # WSS JSON-RPC 客户端
+  src/features/      # 对话流/审批；P3 补 diff/任务列表/终端/文件树
+  src/codex/         # generate-ts 协议绑定（入库 + CI 校验漂移）
+sandbox/
+  images/            # 镜像模板：pin codex + bridge + 工具链，非 root
+  opensandbox/       # OpenSandbox 配置
+  egress/            # egress 白名单策略
+docs/                # 架构决策、客户端对接说明
 ```
 
+- P2 再长 `control-plane/app/{auth,llm_gateway,scheduler}`；依赖与构建文件（pyproject.toml / package.json）随 P1 首个代码任务落地。
 - 内网 agent 客户端代码：`D:\ssd-projects\yice-agent`（本机路径，只读参考；我们不拥有客户端团队，涉及其改动按 §2 先标出并征得同意）。
 - 先搜再写；配置/类型/常量各一个权威文件；密钥走环境变量，禁止硬编码路径/URL。
 - 构建/测试/检查命令：`[P1 脚手架落地后填写]`；完成前必须全绿，未跑写明原因。

@@ -1,7 +1,7 @@
 # AGENTS.md — 云端 Agent 执行服务
 
 定位：内网多租户云端 coding agent 执行服务（codex app-server + OpenSandbox 临时沙箱 + Web 工作区）。
-权威设计：`云端Agent服务方案.md`；实现偏离先回写文档再继续。
+权威设计：`docs/云端Agent服务方案.md`（决策：目标/约束/架构/安全基线）；执行：`docs/实施计划.md`（技术栈/预算/阶段/实测）。实现偏离先回写对应文档再继续。
 冲突裁决：用户当次明确指令 > 本文件 > 模型默认。第 1、2、4、5 节为硬约束，仅用户明说「这次例外」可覆盖。
 
 ## 1. 先规划，确认后执行【硬约束】
@@ -34,7 +34,7 @@ sandbox/
   images/            # 镜像模板：pin codex + bridge + 工具链，非 root
   opensandbox/       # OpenSandbox 配置
   egress/            # egress 白名单策略
-docs/                # 架构决策、客户端对接说明
+docs/                # 架构决策、实施计划、客户端对接说明
 ```
 
 - P2 再长 `control-plane/app/{auth,llm_gateway,scheduler}`；依赖与构建文件（pyproject.toml / package.json）随 P1 首个代码任务落地。

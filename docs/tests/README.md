@@ -15,6 +15,7 @@
 | [2026-11-18 P1 compose 与 Postgres 验证](2026-11-18-P1-compose与Postgres验证.md) | 一次性记录 | L7 开发机部分：Postgres 17 迁移、compose 全栈实跑、3 处阻断修复、卷/台账/egress 证据 |
 | [2026-11-18 P0 K8s/NFS/OIDC 可行性](2026-11-18-P0-K8s与NFS可行性.md) | 一次性记录 | kind 上 OpenSandbox 生命周期与 egress、pause 快照缺口、NFSv4 SQLite 锁、Keycloak OIDC、资源占用 |
 | [2026-11-18 P1.5 K8s 运行时验证](2026-11-18-P1.5-K8s运行时验证.md) | 一次性记录 | 运行时/PVC 抽象落地；kind 上控制面+Postgres+桥接+真实 turn 全链路；PVC 保留语义 |
+| [2026-11-18 P2 控制面验证](2026-11-18-P2-控制面验证.md) | 一次性记录 | P2：真实 Keycloak token、配额、LLM 计量、双客户端扇出、双副本杀 Pod resume、哈希漂移自愈 |
 
 可执行用例不在本目录，代码位置：
 

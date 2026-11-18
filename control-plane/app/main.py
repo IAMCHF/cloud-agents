@@ -89,7 +89,7 @@ def create_app(
         components = getattr(request.app.state, "components", None)
         if not isinstance(components, Components):
             return Response(status_code=503)
-        components.metrics.observe_active_sessions(components.manager.admission.status.active)
+        components.metrics.observe_active_sessions(await components.ledger.active_count())
         return Response(content=components.metrics.render(), media_type=CONTENT_TYPE_LATEST)
 
     return app

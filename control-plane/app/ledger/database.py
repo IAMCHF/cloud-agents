@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,12 @@ class Database:
     def __init__(self, url: str) -> None:
         self._engine = create_async_engine(url, pool_pre_ping=True)
         self._sessionmaker = async_sessionmaker(self._engine, expire_on_commit=False)
+        # 进程内准入串行化；跨副本一致性由 Postgres advisory lock 保证。
+        self.lock = asyncio.Lock()
+
+    @property
+    def dialect_name(self) -> str:
+        return self._engine.dialect.name
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:

@@ -3,6 +3,7 @@
 from app.ledger.database import Database
 from app.ledger.models import AuditEventRow, Base, LlmUsageRow, SessionRow, TenantRow, UserRow
 from app.ledger.repository import (
+    AdmissionRejectedError,
     Ledger,
     SessionRecord,
     TenantRecord,
@@ -11,6 +12,7 @@ from app.ledger.repository import (
 )
 
 __all__ = [
+    "AdmissionRejectedError",
     "AuditEventRow",
     "Base",
     "Database",

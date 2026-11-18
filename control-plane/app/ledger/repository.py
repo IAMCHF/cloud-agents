@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.auth import Principal
@@ -27,6 +28,16 @@ _BATCH_SIZE = 200
 _QUEUE_SIZE = 10_000
 # 计入并发配额的会话状态：创建中与运行中。
 _ACTIVE_STATUSES = ("creating", "running")
+# 全局准入事务锁键（任意固定 int64，仅用于串行化准入）。
+_ADMISSION_LOCK_KEY = 0x434C4F55
+
+
+class AdmissionRejectedError(RuntimeError):
+    """准入拒绝：全局/租户/同属主活跃会话达到上限。"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 def hash_token(token: str) -> str:
@@ -99,6 +110,46 @@ class Ledger:
         self, *, session_id: str, owner: str, token: str, tenant_id: str
     ) -> None:
         async with self._database.session() as session, session.begin():
+            session.add(
+                SessionRow(
+                    id=session_id,
+                    owner=owner,
+                    tenant_id=tenant_id,
+                    status="creating",
+                    token_hash=hash_token(token),
+                )
+            )
+
+    async def admit_session(
+        self,
+        *,
+        session_id: str,
+        owner: str,
+        token: str,
+        tenant_id: str,
+        max_active_sessions: int,
+    ) -> None:
+        """准入并落 creating 会话行：全局、租户、同属主三层校验在同一事务内完成。
+
+        单进程由 Database.lock 串行化，多副本由 Postgres 事务级 advisory lock 串行化；
+        SQLite（测试）没有 advisory lock，靠进程内锁即可。
+        """
+        async with self._database.lock, self._database.session() as session, session.begin():
+            if self._database.dialect_name == "postgresql":
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADMISSION_LOCK_KEY}
+                )
+            if await self._count_sessions(session) >= max_active_sessions:
+                raise AdmissionRejectedError("达到全局活跃会话上限（max_active_sessions）")
+            tenant = await session.get(TenantRow, tenant_id)
+            if tenant is not None and tenant.max_active_sessions > 0:
+                tenant_active = await self._count_sessions(session, tenant_id=tenant_id)
+                if tenant_active >= tenant.max_active_sessions:
+                    raise AdmissionRejectedError(
+                        f"租户 {tenant_id} 活跃会话达到上限（{tenant.max_active_sessions}）"
+                    )
+            if await self._count_sessions(session, owner=owner) > 0:
+                raise AdmissionRejectedError("同用户已有活跃会话")
             session.add(
                 SessionRow(
                     id=session_id,
@@ -200,27 +251,33 @@ class Ledger:
             return int(result.scalar_one())
 
     async def active_count(self) -> int:
-        return await self._count_sessions()
+        async with self._database.session() as session:
+            return await self._count_sessions(session)
 
     async def active_count_for_tenant(self, tenant_id: str) -> int:
-        return await self._count_sessions(tenant_id=tenant_id)
+        async with self._database.session() as session:
+            return await self._count_sessions(session, tenant_id=tenant_id)
 
     async def active_count_for_owner(self, owner: str) -> int:
-        return await self._count_sessions(owner=owner)
+        async with self._database.session() as session:
+            return await self._count_sessions(session, owner=owner)
 
     async def _count_sessions(
-        self, *, tenant_id: str | None = None, owner: str | None = None
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: str | None = None,
+        owner: str | None = None,
     ) -> int:
         conditions: list[ColumnElement[bool]] = [SessionRow.status.in_(_ACTIVE_STATUSES)]
         if tenant_id is not None:
             conditions.append(SessionRow.tenant_id == tenant_id)
         if owner is not None:
             conditions.append(SessionRow.owner == owner)
-        async with self._database.session() as session:
-            result = await session.execute(
-                select(func.count()).select_from(SessionRow).where(*conditions)
-            )
-            return int(result.scalar_one())
+        result = await session.execute(
+            select(func.count()).select_from(SessionRow).where(*conditions)
+        )
+        return int(result.scalar_one())
 
     async def mark_running(self, session_id: str, sandbox_id: str) -> None:
         async with self._database.session() as session, session.begin():

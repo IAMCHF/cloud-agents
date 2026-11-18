@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.auth import Principal
-from app.ledger import Ledger
+from app.ledger import AdmissionRejectedError, Ledger
 
 
 async def _wait_events(ledger: Ledger, session_id: str, expected: int) -> None:
@@ -115,3 +117,59 @@ async def test_active_counts_exclude_ended_sessions(ledger: Ledger) -> None:
     assert await ledger.active_count_for_tenant("acme") == 2
     assert await ledger.active_count_for_tenant("other") == 0
     assert await ledger.active_count_for_owner("alice") == 1
+
+
+async def test_admit_session_rejects_global_limit(ledger: Ledger) -> None:
+    await ledger.admit_session(
+        session_id="g1", owner="alice", token="t", tenant_id="default", max_active_sessions=1
+    )
+
+    with pytest.raises(AdmissionRejectedError, match="全局活跃"):
+        await ledger.admit_session(
+            session_id="g2", owner="bob", token="t", tenant_id="default", max_active_sessions=1
+        )
+
+    # 拒绝发生在同一事务内，不留下会话行。
+    assert await ledger.get("g2") is None
+    assert await ledger.active_count() == 1
+
+
+async def test_admit_session_enforces_tenant_quota(ledger: Ledger) -> None:
+    await ledger.ensure_tenant("acme", max_active_sessions=1, monthly_token_budget=0)
+    await ledger.admit_session(
+        session_id="t1", owner="alice", token="t", tenant_id="acme", max_active_sessions=10
+    )
+
+    with pytest.raises(AdmissionRejectedError, match="租户 acme"):
+        await ledger.admit_session(
+            session_id="t2", owner="bob", token="t", tenant_id="acme", max_active_sessions=10
+        )
+
+    # 未建档租户（无配额行）不受租户上限约束，只受全局上限约束。
+    await ledger.admit_session(
+        session_id="t3", owner="carol", token="t", tenant_id="default", max_active_sessions=10
+    )
+    assert await ledger.active_count_for_tenant("acme") == 1
+
+
+async def test_admit_session_rejects_second_session_for_owner(ledger: Ledger) -> None:
+    await ledger.admit_session(
+        session_id="o1", owner="alice", token="t", tenant_id="default", max_active_sessions=10
+    )
+
+    with pytest.raises(AdmissionRejectedError, match="同用户"):
+        await ledger.admit_session(
+            session_id="o2", owner="alice", token="t", tenant_id="default", max_active_sessions=10
+        )
+
+
+async def test_admit_session_releases_slot_after_end(ledger: Ledger) -> None:
+    await ledger.admit_session(
+        session_id="r1", owner="alice", token="t", tenant_id="default", max_active_sessions=1
+    )
+    await ledger.mark_ended("r1", "stopped")
+
+    await ledger.admit_session(
+        session_id="r2", owner="alice", token="t", tenant_id="default", max_active_sessions=1
+    )
+    assert await ledger.active_count() == 1

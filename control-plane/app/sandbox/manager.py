@@ -20,7 +20,6 @@ from urllib.parse import urlsplit
 from app.bridge.hub import SessionHub
 from app.config import Settings
 from app.ledger import Ledger
-from app.sandbox.admission import AdmissionController
 from app.sandbox.client import OpenSandboxClient, OpenSandboxError, SandboxInfo, SandboxSpec
 
 logger = logging.getLogger(__name__)
@@ -46,7 +45,6 @@ class SandboxManager:
         hub: SessionHub,
         ledger: Ledger,
         client: OpenSandboxClient,
-        admission: AdmissionController | None = None,
         detach_settle_seconds: float = 1.0,
     ) -> None:
         self._settings = settings
@@ -54,17 +52,19 @@ class SandboxManager:
         self._ledger = ledger
         self._client = client
         self._detach_settle_seconds = detach_settle_seconds
-        self._admission = admission or AdmissionController(max_active=settings.max_active_sessions)
-
-    @property
-    def admission(self) -> AdmissionController:
-        return self._admission
 
     async def create_session(self, owner: str, tenant_id: str) -> SessionHandle:
         session_id = f"s-{uuid.uuid4().hex}"
         token = secrets.token_urlsafe(32)
 
-        await self._admission.acquire(session_id, owner)
+        # 准入与建行在同一台账事务内完成，多副本下由 Postgres advisory lock 串行化。
+        await self._ledger.admit_session(
+            session_id=session_id,
+            owner=owner,
+            token=token,
+            tenant_id=tenant_id,
+            max_active_sessions=self._settings.max_active_sessions,
+        )
         self._hub.create(session_id, token, owner)
         sandbox_id: str | None = None
         try:
@@ -73,16 +73,13 @@ class SandboxManager:
             await self._client.wait_until_running(
                 created.id, timeout=self._settings.sandbox_start_timeout_seconds
             )
-            await self._ledger.create_session(
-                session_id=session_id, owner=owner, token=token, tenant_id=tenant_id
-            )
             await self._ledger.mark_running(session_id, created.id)
         except BaseException:
             if sandbox_id is not None:
                 with contextlib.suppress(OpenSandboxError):
                     await self._client.delete(sandbox_id)
             self._hub.remove(session_id)
-            await self._admission.release(session_id)
+            await self._ledger.mark_ended(session_id, "create_failed")
             raise
 
         self._ledger.submit_event(session_id, "session.created", {"sandbox_id": sandbox_id})
@@ -101,7 +98,6 @@ class SandboxManager:
             with contextlib.suppress(OpenSandboxError):
                 await self._client.delete(record.sandbox_id)
         self._hub.remove(session_id)
-        await self._admission.release(session_id)
         await self._ledger.mark_ended(session_id, reason)
         self._ledger.submit_event(session_id, "session.stopped", {"reason": reason})
 
@@ -146,7 +142,6 @@ class SandboxManager:
         if info is not None and info.running:
             return
         await self._ledger.mark_ended(session_id, "sandbox_exited")
-        await self._admission.release(session_id)
         self._hub.remove(session_id)
         self._ledger.submit_event(
             session_id,

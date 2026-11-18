@@ -95,8 +95,9 @@ class LlmGateway:
             for name, value in upstream_response.headers.items()
             if name.lower() in _PASSTHROUGH_RESPONSE_HEADERS
         }
+        # 必须用解压后的字节流：raw 会把 gzip 压缩体直接透传，客户端按 UTF-8 解析即失败。
         return StreamingResponse(
-            upstream_response.aiter_raw(),
+            upstream_response.aiter_bytes(),
             status_code=upstream_response.status_code,
             headers=response_headers,
             background=BackgroundTask(upstream_response.aclose),

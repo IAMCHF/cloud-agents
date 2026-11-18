@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -29,11 +30,15 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _manager(
-    tmp_path: Path, ledger: Ledger, osb: FakeOpenSandbox, hub: SessionHub
+    tmp_path: Path,
+    ledger: Ledger,
+    osb: FakeOpenSandbox,
+    hub: SessionHub,
+    **overrides: Any,
 ) -> SandboxManager:
     client = OpenSandboxClient(base_url="http://osb", timeout=5, transport=osb.transport())
     return SandboxManager(
-        settings=_settings(tmp_path),
+        settings=_settings(tmp_path).model_copy(update=overrides),
         hub=hub,
         ledger=ledger,
         client=client,
@@ -61,6 +66,7 @@ async def test_create_session_injects_env_and_volume(ledger: Ledger, tmp_path: P
     assert env["OPENAI_BASE_URL"] == "http://cp:8000/llm/v1"
     assert env["OPENAI_API_KEY"] == handle.session_token
     assert env["WORKSPACE_DIR"] == "/workspace"
+    assert "CODEX_MODEL" not in env
 
     volume = payload["volumes"][0]
     assert volume["mountPath"] == "/workspace"
@@ -152,3 +158,23 @@ async def test_unknown_session_stop_raises(ledger: Ledger, tmp_path: Path) -> No
 
     with pytest.raises(LookupError):
         await manager.stop_session("missing")
+
+
+async def test_create_session_injects_model_limits(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(
+        tmp_path,
+        ledger,
+        osb,
+        SessionHub(),
+        codex_model="deepseek-flash",
+        codex_reasoning_effort="minimal",
+        codex_context_window=100000,
+    )
+
+    await manager.create_session("alice")
+
+    env = osb.created[0]["env"]
+    assert env["CODEX_MODEL"] == "deepseek-flash"
+    assert env["CODEX_REASONING_EFFORT"] == "minimal"
+    assert env["CODEX_CONTEXT_WINDOW"] == "100000"

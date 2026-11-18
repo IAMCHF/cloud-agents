@@ -60,7 +60,8 @@ def test_prepare_codex_home_writes_provider_config(
     monkeypatch.setenv("OPENAI_BASE_URL", "http://cp:8000/llm/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "session-token")
     monkeypatch.setenv("CODEX_MODEL", "internal-codex")
-    monkeypatch.delenv("LLM_WIRE_API", raising=False)
+    monkeypatch.setenv("CODEX_REASONING_EFFORT", "minimal")
+    monkeypatch.setenv("CODEX_CONTEXT_WINDOW", "100000")
 
     _prepare_codex_home()
 
@@ -69,6 +70,8 @@ def test_prepare_codex_home_writes_provider_config(
     assert 'base_url = "http://cp:8000/llm/v1"' in content
     assert 'env_key = "OPENAI_API_KEY"' in content
     assert 'wire_api = "responses"' in content
+    assert 'model_reasoning_effort = "minimal"' in content
+    assert "model_context_window = 100000" in content
     assert "session-token" not in content
 
 

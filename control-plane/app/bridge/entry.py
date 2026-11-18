@@ -78,6 +78,12 @@ def _prepare_codex_home() -> None:
     model = os.environ.get("CODEX_MODEL", "").strip()
     if model:
         lines.append(f'model = "{model}"')
+    effort = os.environ.get("CODEX_REASONING_EFFORT", "").strip()
+    if effort:
+        lines.append(f'model_reasoning_effort = "{effort}"')
+    context_window = os.environ.get("CODEX_CONTEXT_WINDOW", "").strip()
+    if context_window.isdigit():
+        lines.append(f"model_context_window = {context_window}")
     lines.extend(
         [
             'model_provider = "cloud"',
@@ -86,7 +92,8 @@ def _prepare_codex_home() -> None:
             'name = "cloud"',
             f'base_url = "{base_url}"',
             'env_key = "OPENAI_API_KEY"',
-            f'wire_api = "{os.environ.get("LLM_WIRE_API", "responses")}"',
+            # codex 0.167 起只支持 Responses API（chat wire_api 已移除）。
+            'wire_api = "responses"',
         ]
     )
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

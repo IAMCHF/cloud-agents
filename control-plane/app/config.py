@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     sandbox_start_timeout_seconds: float = 90.0
     max_active_sessions: int = 24
 
+    # 沙箱内 codex 的模型名与推理/上下文限制（空/0 用 codex 默认）。
+    codex_model: str = ""
+    codex_reasoning_effort: str = ""
+    codex_context_window: int = 0
+
     # 用户卷：host 挂载（Docker）或平台命名卷（K8s）。
     volume_backend: Literal["host", "pvc"] = "host"
     workspace_host_root: str = ""

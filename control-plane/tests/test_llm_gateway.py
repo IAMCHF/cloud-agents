@@ -72,3 +72,34 @@ def test_forwards_with_session_token_and_injects_real_key(tmp_path: Path) -> Non
     assert str(forwarded.url) == "http://upstream/v1/chat/completions?trace=1"
     assert forwarded.headers["authorization"] == "Bearer real-key"
     assert json.loads(forwarded.content) == {"model": "m", "stream": True}
+
+
+def test_decompresses_gzip_upstream_stream(tmp_path: Path) -> None:
+    import gzip
+
+    settings = _settings(tmp_path)
+    hub = SessionHub()
+    hub.create("s1", "session-token", "alice")
+    payload = b'data: {"delta":"hi"}\n\n'
+
+    def upstream(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream", "content-encoding": "gzip"},
+            content=gzip.compress(payload),
+        )
+
+    async def factory(resolved: Settings, resolved_hub: SessionHub) -> Components:
+        return await build_test_components(
+            resolved, resolved_hub, llm_transport=httpx.MockTransport(upstream)
+        )
+
+    app = create_app(settings=settings, hub=hub, components_factory=factory)
+    with TestClient(app) as client:
+        response = client.post(
+            "/llm/v1/responses",
+            headers={"Authorization": "Bearer session-token"},
+            json={"model": "m", "stream": True},
+        )
+    assert response.status_code == 200
+    assert response.content == payload

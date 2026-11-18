@@ -161,6 +161,17 @@ class SandboxManager:
                 "CODEX_HOME": _CODEX_HOME,
                 "OPENAI_BASE_URL": settings.llm_public_base_url,
                 "OPENAI_API_KEY": token,
+                **({"CODEX_MODEL": settings.codex_model} if settings.codex_model else {}),
+                **(
+                    {"CODEX_REASONING_EFFORT": settings.codex_reasoning_effort}
+                    if settings.codex_reasoning_effort
+                    else {}
+                ),
+                **(
+                    {"CODEX_CONTEXT_WINDOW": str(settings.codex_context_window)}
+                    if settings.codex_context_window > 0
+                    else {}
+                ),
             },
             volumes=[
                 {

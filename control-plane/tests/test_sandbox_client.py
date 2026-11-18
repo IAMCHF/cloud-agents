@@ -31,6 +31,7 @@ def test_spec_payload_shape() -> None:
     assert payload["resourceLimits"] == {"cpu": "2", "memory": "2Gi"}
     assert payload["timeout"] == 600
     assert payload["volumes"][0]["host"]["path"] == "/v/s1"
+    assert "networkPolicy" not in payload
 
 
 async def test_wait_until_running_polls_states() -> None:

@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     sandbox_start_timeout_seconds: float = 90.0
     max_active_sessions: int = 24
 
+    # 沙箱出口策略：默认拒绝；白名单 target、target:port 或 [IPv6]:port（逗号分隔，
+    # 裸 IP/CIDR 含 IPv6 不拆端口）。控制面/网关地址会自动加入白名单。
+    sandbox_network_default_action: Literal["deny", "allow"] = "deny"
+    sandbox_egress_allow: str = ""
+
     # 沙箱内 codex 的模型名与推理/上下文限制（空/0 用 codex 默认）。
     codex_model: str = ""
     codex_reasoning_effort: str = ""

@@ -18,6 +18,14 @@ network_mode = "bridge"              # networkPolicy / egress sidecar 需要 bri
 publish_host = "127.0.0.1"           # 端口不暴露到公网接口
 no_new_privileges = true
 pids_limit = 4096
+drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+
+[egress]
+# 默认全拒的执行层：必须 dns+nft——dns 模式只拦 DNS 解析，直连 IP 可绕过（2026-11-18 实测）。
+# 放行策略由控制面随创建请求下发（networkPolicy / SANDBOX_EGRESS_ALLOW），这里只配 sidecar 运行时。
+# 已知限制：ports 字段不被 sidecar v1.1.7 执行，白名单实际 IP 级；升级 sidecar 须复测。
+image = "<egress 镜像:pin>"           # 必填，按部署 pin 版本（实测 opensandbox/egress:v1.1.7）
+mode = "dns+nft"
 
 [storage]
 # host 卷挂载白名单：留空等于拒绝所有 host 挂载（安全默认）。

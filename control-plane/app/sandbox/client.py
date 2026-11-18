@@ -28,6 +28,7 @@ class SandboxSpec:
     timeout_seconds: int
     metadata: dict[str, str] = field(default_factory=dict)
     volumes: list[dict[str, Any]] = field(default_factory=list)
+    network_policy: dict[str, Any] | None = None
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -40,6 +41,8 @@ class SandboxSpec:
         }
         if self.volumes:
             payload["volumes"] = self.volumes
+        if self.network_policy is not None:
+            payload["networkPolicy"] = self.network_policy
         return payload
 
 

@@ -10,8 +10,8 @@
 
 ## 步骤
 
-1. 复制 `.env.example` 为 `.env`，至少填：`P1_AUTH_TOKEN`、`OPEN_SANDBOX_API_KEY`、`PUBLIC_BASE_URL`（沙箱可达的控制面地址）、`WORKSPACE_HOST_ROOT`、`POSTGRES_PASSWORD`、`SANDBOX_CONFIG_PATH`、`LLM_UPSTREAM_BASE_URL/LLM_API_KEY`。
-2. 从 `sandbox/opensandbox/config.example.toml` 复制出执行机配置（填 `execd_image`、`eip`、`storage.allowed_host_paths`），把绝对路径写进 `SANDBOX_CONFIG_PATH`。`allowed_host_paths` 必须覆盖 `WORKSPACE_HOST_ROOT`，否则创建沙箱会被拒。
+1. 复制**仓库根** `.env.example` 为 `.env`（compose 读取 `../.env`），至少填：`P1_AUTH_TOKEN`、`OPEN_SANDBOX_API_KEY`、`PUBLIC_BASE_URL`（沙箱可达的控制面地址）、`WORKSPACE_HOST_ROOT`、`POSTGRES_PASSWORD`、`SANDBOX_CONFIG_PATH`、`LLM_UPSTREAM_BASE_URL/LLM_API_KEY`；按需配 `SANDBOX_EGRESS_ALLOW`（内部 git/包镜像域名，控制面/网关自动放行）。
+2. 从 `sandbox/opensandbox/config.example.toml` 复制出执行机配置（填 `execd_image`、`eip`、`storage.allowed_host_paths`、`[egress] image`），把绝对路径写进 `SANDBOX_CONFIG_PATH`。`allowed_host_paths` 必须覆盖 `WORKSPACE_HOST_ROOT`，否则创建沙箱会被拒。**`[egress] mode` 必须为 `dns+nft`**——`dns` 模式只拦 DNS，直连 IP 可绕过（2026-11-18 实测）。
 3. 构建并启动：`docker compose -f deploy/compose.yaml --env-file .env up -d --build`。
 4. 构建沙箱镜像并让 OpenSandbox 能拉到（`SANDBOX_IMAGE` 指向它）。
 
@@ -29,5 +29,5 @@
 ## 已知边界（P1）
 
 - Compose 是单机模板，不做 HA；控制面单 worker，进程内准入/通道状态。
-- read-only rootfs、每沙箱 cgroup 限额依赖 OpenSandbox 运行时能力，P1 未在 Docker 模式验证；沙箱加固项见 `sandbox/opensandbox/config.example.toml`。
+- 每沙箱 cgroup 限额已验施加、egress 默认全拒已强制（2026-11-18 开发机实测，见 `docs/tests/2026-11-18-P1-egress与cgroup验证.md`）；read-only rootfs 未实现（OpenSandbox 创建 API 无字段，P4）。egress 白名单实际 IP 级（sidecar v1.1.7 不执行 `ports`）；沙箱加固项见 `sandbox/opensandbox/config.example.toml`。
 - OpenSandbox 镜像/包版本需在执行机侧 pin，仓库只给模板。

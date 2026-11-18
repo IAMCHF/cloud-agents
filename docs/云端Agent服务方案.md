@@ -69,9 +69,9 @@ OpenSandbox 及一切服务端组件对客户端不可见。联动：同一控�
 
 基线为目标态；各条附 P1 真机实测状态（2026-11-18），未兑现项统一跟踪于实施计划 §7。
 
-- 容器：非 root、只读根文件系统、drop capabilities、cgroup 限额。**P1 状态**：非 root 已落镜像；cgroup 限额经 OpenSandbox API `resourceLimits`（cpu=2/memory=2Gi）传入，是否真施加未验证；只读根文件系统未实现。两项是密度模型前提（L2）。
+- 容器：非 root、只读根文件系统、drop capabilities、cgroup 限额。**P1 状态（2026-11-18 实测，证据见 [egress 与 cgroup 验证](tests/2026-11-18-P1-egress与cgroup验证.md)）**：非 root 已落镜像；cgroup 限额已由 `resourceLimits` 真实施加（`docker inspect`：NanoCpus=2、Memory=2GiB、PidsLimit=4096，capabilities 已 drop + no-new-privileges）；**只读根文件系统未实现**——OpenSandbox 创建 API 无 rootfs 只读字段（仅卷级 `readOnly`），Docker 模式下 `ReadonlyRootfs=false`，需回退裸 Docker SDK 或换运行时（P4）补。
 - codex 自身沙箱：容器内无 user namespace 权限，bwrap 嵌套沙箱不可用（真机实测）；默认 `sandbox_mode=danger-full-access` + `approval_policy=on-request`（env 可覆盖），**容器即唯一隔离边界**。据此 gVisor（P4）优先级上调：容器内全权限意味着逃逸直达用户卷。
-- 网络：每沙箱 egress 默认全拒，白名单仅**控制面 WSS 端点（桥接回连）**/ LLM 网关 / 内部 git / 包镜像四类；预览 Ingress 带会话级鉴权（仅属主可访问）。**P1 未强制**：仅交付策略示例（`sandbox/egress/policy.example.yaml`），创建请求未接 networkPolicy，真机验收实际走公网模型 API 即出口未受限。单租户开发机阶段接受该缺口；**P2 多租户/内网部署前必须强制**（L1），OpenSandbox Docker 模式 egress 能力待核实。codex 自身外联（auth/telemetry/更新检查）显式关闭亦未落配置，当前无全拒兜底，随 egress 一并补。
+- 网络：每沙箱 egress 默认全拒，白名单仅**控制面 WSS 端点（桥接回连）**/ LLM 网关 / 内部 git / 包镜像四类；预览 Ingress 带会话级鉴权（仅属主可访问）。**P1 已强制（2026-11-18 实测，证据见 [egress 与 cgroup 验证](tests/2026-11-18-P1-egress与cgroup验证.md)）**：创建请求已接 `networkPolicy`（`defaultAction=deny`，控制面/网关自动放行，其余由 `SANDBOX_EGRESS_ALLOW` 配置）；**执行机 OpenSandbox 必须配 `[egress] mode="dns+nft"`**——`dns` 模式只拦 DNS 解析，直连 IP 可绕过（实测），`dns+nft` 下公网 DNS/直连 IP 全拒、硬编码 DNS 服务器被透明拦截过滤，真实模型 turn 仍通过。上游限制（egress sidecar v1.1.7）：`ports` 字段接受但不执行，白名单实际为 **IP 级**；域名规则不支持 `ports`。codex 自身外联即容器网络，已被同一策略约束，无需单独配置。
 - 数据：每用户独立卷，挂载校验属主；沙箱销毁不删卷。P1 已验：host 卷白名单 + 会话级子目录，文件写入宿主卷可见、销毁不删卷。
 - 隔离强度：内网认证员工威胁模型下容器级起步，需加强上 gVisor（无 KVM 依赖）；不上 Kata/microVM（内网 VM 无嵌套虚拟化）。
 - 部署机代理：控制面 httpx 默认读系统代理（trust_env），内网部署机须无系统代理或显式设 NO_PROXY，防流量经代理外泄（C5）；测试已在 conftest 固定 NO_PROXY，门禁不依赖开发机代理设置（2026-11-18）。

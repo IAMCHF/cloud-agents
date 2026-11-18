@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 import secrets
 import uuid
 from dataclasses import dataclass
+from typing import Any
+from urllib.parse import urlsplit
 
 from app.bridge.hub import SessionHub
 from app.config import Settings
@@ -143,6 +146,37 @@ class SandboxManager:
             {"sandbox_state": info.state if info is not None else "unknown"},
         )
 
+    def _network_policy(self) -> dict[str, Any] | None:
+        """默认拒绝 + 白名单放行；控制面/网关地址始终放行。"""
+        settings = self._settings
+        if settings.sandbox_network_default_action == "allow":
+            return None
+        rules: list[dict[str, Any]] = []
+        seen: set[tuple[str, int | None]] = set()
+
+        def add(target: str, port: int | None) -> None:
+            key = (target, port)
+            if target and key not in seen:
+                seen.add(key)
+                rule: dict[str, Any] = {"action": "allow", "target": target}
+                # OpenSandbox API 只允许 IP/CIDR 规则带端口；域名规则忽略端口。
+                # 注意：ports 不被 egress sidecar v1.1.7 执行（白名单实际 IP 级），
+                # 按契约下发仅为前向兼容；升级 sidecar 须复测（docs/tests 验证记录）。
+                if port is not None and _is_ip_target(target):
+                    rule["ports"] = [port]
+                rules.append(rule)
+
+        gateway = urlsplit(settings.public_base_url)
+        if gateway.hostname:
+            add(gateway.hostname, gateway.port)
+        for item in settings.sandbox_egress_allow.split(","):
+            entry = item.strip()
+            if not entry:
+                continue
+            target, port = _parse_egress_entry(entry)
+            add(target, port)
+        return {"defaultAction": "deny", "egress": rules}
+
     def _spec(self, session_id: str, token: str) -> SandboxSpec:
         settings = self._settings
         if settings.volume_backend != "host":
@@ -186,4 +220,28 @@ class SandboxManager:
             memory=settings.sandbox_memory,
             timeout_seconds=settings.sandbox_timeout_seconds,
             metadata={"session_id": session_id, "kind": "cloud-agent"},
+            network_policy=self._network_policy(),
         )
+
+
+def _parse_egress_entry(entry: str) -> tuple[str, int | None]:
+    """解析白名单项：target、target:port、[IPv6]:port；裸 IP/CIDR（含 IPv6）不拆端口。"""
+    if entry.startswith("["):
+        host, sep, tail = entry[1:].partition("]:")
+        if sep and tail.isdigit():
+            return host, int(tail)
+        return entry, None
+    if _is_ip_target(entry):
+        return entry, None
+    head, sep, tail = entry.rpartition(":")
+    if sep and tail.isdigit():
+        return head, int(tail)
+    return entry, None
+
+
+def _is_ip_target(target: str) -> bool:
+    try:
+        ipaddress.ip_network(target, strict=False)
+    except ValueError:
+        return False
+    return True

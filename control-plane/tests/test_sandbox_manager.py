@@ -58,6 +58,9 @@ async def test_create_session_injects_env_and_volume(ledger: Ledger, tmp_path: P
     assert payload["entrypoint"] == ["python", "-m", "app.bridge"]
     assert payload["resourceLimits"] == {"cpu": "2", "memory": "2Gi"}
     assert payload["timeout"] == 900
+    policy = payload["networkPolicy"]
+    assert policy["defaultAction"] == "deny"
+    assert {"action": "allow", "target": "cp"} in policy["egress"]
 
     env = payload["env"]
     assert env["SESSION_ID"] == handle.session_id
@@ -178,3 +181,41 @@ async def test_create_session_injects_model_limits(ledger: Ledger, tmp_path: Pat
     assert env["CODEX_MODEL"] == "deepseek-flash"
     assert env["CODEX_REASONING_EFFORT"] == "minimal"
     assert env["CODEX_CONTEXT_WINDOW"] == "100000"
+
+
+async def test_network_policy_parses_allow_list(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(
+        tmp_path,
+        ledger,
+        osb,
+        SessionHub(),
+        sandbox_egress_allow="api.example.com,*.corp:443,10.0.0.0/8",
+    )
+
+    await manager.create_session("alice")
+
+    rules = osb.created[0]["networkPolicy"]["egress"]
+    assert {"action": "allow", "target": "api.example.com"} in rules
+    assert {"action": "allow", "target": "*.corp"} in rules
+    assert {"action": "allow", "target": "10.0.0.0/8"} in rules
+
+
+async def test_network_policy_parses_ip_and_ipv6_ports(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(
+        tmp_path,
+        ledger,
+        osb,
+        SessionHub(),
+        sandbox_egress_allow="1.2.3.4:443,2001:db8::1,[2001:db8::2]:8443,192.168.0.0/16",
+    )
+
+    await manager.create_session("alice")
+
+    rules = osb.created[0]["networkPolicy"]["egress"]
+    assert {"action": "allow", "target": "1.2.3.4", "ports": [443]} in rules
+    # 裸 IPv6/CIDR 不被 rpartition(":") 误拆成 target:port
+    assert {"action": "allow", "target": "2001:db8::1"} in rules
+    assert {"action": "allow", "target": "192.168.0.0/16"} in rules
+    assert {"action": "allow", "target": "2001:db8::2", "ports": [8443]} in rules

@@ -17,10 +17,14 @@ from app.bridge.hub import (
     SessionHub,
 )
 from app.config import Settings
+from app.ledger import Ledger
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# 可重建通道的会话状态：创建中与运行中（ended 的 token 不再可用）。
+_ACTIVE_STATUSES = ("creating", "running")
 
 
 def _hub(websocket: WebSocket) -> SessionHub:
@@ -30,10 +34,25 @@ def _hub(websocket: WebSocket) -> SessionHub:
     return hub
 
 
+async def _authorize(websocket: WebSocket, session_id: str, token: str) -> SessionChannel | None:
+    """本进程有通道直接认证；没有则按台账重建（多副本/重启后 WS 落在任意实例）。"""
+    hub = _hub(websocket)
+    channel = hub.authorize(session_id, token)
+    if channel is not None:
+        return channel
+    ledger = getattr(websocket.app.state, "ledger", None)
+    if not isinstance(ledger, Ledger):
+        return None
+    record = await ledger.find_session_by_token(token)
+    if record is None or record.session_id != session_id or record.status not in _ACTIVE_STATUSES:
+        return None
+    return hub.ensure(session_id, token, record.owner)
+
+
 async def _authenticate(websocket: WebSocket, session_id: str, token: str) -> SessionChannel | None:
     """先 accept 再 close：未 accept 时 Starlette 回 HTTP 403，客户端拿不到业务关闭码。"""
     await websocket.accept()
-    channel = _hub(websocket).authorize(session_id, token)
+    channel = await _authorize(websocket, session_id, token)
     if channel is None:
         await websocket.close(code=CLOSE_UNAUTHORIZED, reason="invalid session token")
     return channel

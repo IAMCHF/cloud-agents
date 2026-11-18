@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     # 台账/审计。
     database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/cloud_agents"
     audit_flush_interval_seconds: float = 0.2
+    # 启动对账：只结束创建超过该时长的 creating 会话；running 保留供 WS 重连重建。
+    creating_stale_timeout_seconds: float = 300.0
 
     # 浏览器跨域访问管理面/网关时按需放开（逗号分隔；默认不放开）。
     cors_allow_origins: str = ""

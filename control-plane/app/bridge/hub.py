@@ -104,6 +104,14 @@ class SessionHub:
         self._channels[session_id] = channel
         return channel
 
+    def ensure(self, session_id: str, token: str, owner: str) -> SessionChannel:
+        """按台账重建通道：已存在则复用（函数内无 await，检查-创建在事件循环内原子）。"""
+        channel = self._channels.get(session_id)
+        if channel is None:
+            channel = self.create(session_id, token, owner)
+            logger.info("会话 %s 通道已按台账重建", session_id)
+        return channel
+
     def remove(self, session_id: str) -> None:
         self._channels.pop(session_id, None)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from app.bridge.hub import SessionHub
 from app.config import Settings
@@ -39,9 +40,11 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     database = Database(settings.database_url)
     ledger = Ledger(database, flush_interval=settings.audit_flush_interval_seconds)
     await ledger.start()
-    stale = await ledger.end_stale_sessions("control_plane_restart")
+    # 多副本/重启对账：running 会话保留，等待沙箱桥接/客户端重连时按台账重建通道。
+    stale_before = datetime.now(UTC) - timedelta(seconds=settings.creating_stale_timeout_seconds)
+    stale = await ledger.end_stale_creating(older_than=stale_before, reason="stale_creating")
     if stale:
-        logger.warning("启动对账：%s 个残留会话已标记结束", stale)
+        logger.warning("启动对账：%s 个超时创建中的会话已标记结束", stale)
     client = OpenSandboxClient(
         base_url=settings.opensandbox_base_url,
         api_key=settings.opensandbox_api_key,

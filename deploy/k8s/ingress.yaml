@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloud-agents
+  namespace: cloud-agents
+  annotations:
+    # 会话粘性：桥接与客户端都用同一会话 token 作查询参数（?token=...），
+    # 按 $arg_token 一致性哈希，保证同一会话的桥接与所有客户端 WS 落在同一副本。
+    # 不能用 $uri：/ws/bridge/<id> 与 /ws/session/<id> 的 URI 不同，会被打到不同副本。
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_token"
+    # WebSocket / SSE 长连接：读放大到 1 小时，关闭响应缓冲保证流式及时下发。
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    # 无 host 规则：用入口 IP/任意指向它的域名访问；生产按实际域名补 host 与 TLS。
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: control-plane
+                port:
+                  number: 8000

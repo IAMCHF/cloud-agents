@@ -296,14 +296,14 @@ class Ledger:
             row.ended_at = datetime.now(UTC)
             row.end_reason = reason
 
-    async def end_stale_sessions(self, reason: str) -> int:
-        """控制面重启后清理残留的 creating/running（单 worker 无通道状态可恢复）。"""
+    async def end_stale_creating(self, *, older_than: datetime, reason: str) -> int:
+        """控制面重启对账：只结束卡在 creating 且超过时限的会话；running 保留供 WS 重连重建。"""
         async with self._database.session() as session, session.begin():
             result = cast(
                 CursorResult[Any],
                 await session.execute(
                     update(SessionRow)
-                    .where(SessionRow.status.in_(("creating", "running")))
+                    .where(SessionRow.status == "creating", SessionRow.created_at < older_than)
                     .values(status="ended", ended_at=datetime.now(UTC), end_reason=reason)
                 ),
             )

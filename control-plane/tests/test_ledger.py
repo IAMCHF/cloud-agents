@@ -47,19 +47,26 @@ async def test_mark_ended_is_idempotent(ledger: Ledger) -> None:
     assert record.end_reason == "first"
 
 
-async def test_end_stale_sessions_marks_unfinished(ledger: Ledger) -> None:
-    await ledger.create_session(session_id="s3", owner="alice", token="tok", tenant_id="default")
-    await ledger.create_session(session_id="s4", owner="alice", token="tok", tenant_id="default")
+async def test_end_stale_creating_keeps_running(ledger: Ledger) -> None:
+    await ledger.create_session(session_id="s3", owner="alice", token="t", tenant_id="default")
+    await ledger.create_session(session_id="s4", owner="bob", token="t2", tenant_id="default")
     await ledger.mark_running("s4", "sb-1")
-    await ledger.mark_ended("s1", "stopped")
 
-    ended = await ledger.end_stale_sessions("control_plane_restart")
+    # 未超时不动；超时的 creating 结束，running 保留供 WS 重连重建。
+    recent = datetime.now(UTC) - timedelta(hours=1)
+    assert await ledger.end_stale_creating(older_than=recent, reason="stale") == 0
+    ended = await ledger.end_stale_creating(
+        older_than=datetime.now(UTC) + timedelta(minutes=1), reason="stale_creating"
+    )
 
-    assert ended == 2
-    record = await ledger.get("s4")
-    assert record is not None
-    assert record.status == "ended"
-    assert record.end_reason == "control_plane_restart"
+    assert ended == 1
+    creating = await ledger.get("s3")
+    assert creating is not None
+    assert creating.status == "ended"
+    assert creating.end_reason == "stale_creating"
+    running = await ledger.get("s4")
+    assert running is not None
+    assert running.status == "running"
 
 
 async def test_ensure_principal_creates_tenant_and_updates_last_seen(ledger: Ledger) -> None:

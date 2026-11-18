@@ -18,7 +18,7 @@ from app.bridge.hub import (
     SessionHub,
 )
 from app.config import Settings
-from app.ledger import Database
+from app.ledger import Database, Ledger
 from app.main import create_app
 
 TOKEN = "session-token"
@@ -37,14 +37,17 @@ def _client(hub: SessionHub) -> TestClient:
         database_url=f"sqlite+aiosqlite:///{Path(tempfile.mkdtemp()) / 'hub.db'}",
         public_base_url="http://127.0.0.1:1",
     )
+    hub.create("s1", TOKEN, "alice")
+    return _client_with_settings(settings, hub)
 
+
+def _client_with_settings(settings: Settings, hub: SessionHub) -> TestClient:
     async def _init() -> None:
         database = Database(settings.database_url)
         await database.create_schema()
         await database.dispose()
 
     asyncio.run(_init())
-    hub.create("s1", TOKEN, "alice")
     return TestClient(create_app(settings=settings, hub=hub))
 
 
@@ -75,6 +78,16 @@ def _wait_event(events: list[tuple[str, str, dict[str, Any]]], kind: str) -> Non
             return
         time.sleep(0.01)
     raise AssertionError(f"未收到审计事件 {kind}")
+
+
+def _wait_channel(hub: SessionHub, session_id: str) -> None:
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        channel = hub.get(session_id)
+        if channel is not None and channel.bridge is not None:
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"会话 {session_id} 通道/桥接未就绪")
 
 
 def _wait_clients(hub: SessionHub, session_id: str, count: int) -> None:
@@ -218,6 +231,54 @@ def test_slow_client_is_dropped_without_blocking_others() -> None:
     assert channel.clients == {}
     assert fake.closed == [CLOSE_SLOW_CLIENT]
     assert any(kind == "client.dropped" for _, kind, _ in events)
+
+
+def test_rebuilds_channel_from_ledger_on_connect() -> None:
+    """多副本/重启：本进程没有通道时，凭台账中的 running 会话重建（token 与会话必须匹配）。"""
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{Path(tempfile.mkdtemp()) / 'rebuild.db'}",
+        public_base_url="http://127.0.0.1:1",
+    )
+
+    async def _seed() -> None:
+        database = Database(settings.database_url)
+        await database.create_schema()
+        ledger = Ledger(database)
+        await ledger.admit_session(
+            session_id="s9",
+            owner="alice",
+            token="tok-9",
+            tenant_id="default",
+            max_active_sessions=10,
+        )
+        await ledger.admit_session(
+            session_id="s10",
+            owner="bob",
+            token="tok-10",
+            tenant_id="default",
+            max_active_sessions=10,
+        )
+        await ledger.mark_ended("s10", "stopped")
+        await database.dispose()
+
+    asyncio.run(_seed())
+    hub = SessionHub()
+    with _client_with_settings(settings, hub) as client:
+        assert hub.get("s9") is None
+        with client.websocket_connect("/ws/session/s9?token=tok-9") as web:
+            with client.websocket_connect("/ws/bridge/s9?token=tok-9") as bridge:
+                _wait_channel(hub, "s9")
+                channel = hub.get("s9")
+                assert channel is not None
+                assert channel.owner == "alice"
+                bridge.send_text('{"method":"turn/started","params":{}}')
+                assert json.loads(web.receive_text())["method"] == "turn/started"
+
+        for path in ("/ws/session/s9?token=other", "/ws/session/s10?token=tok-10"):
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                with client.websocket_connect(path) as websocket:
+                    websocket.receive_text()
+            assert exc_info.value.code == CLOSE_UNAUTHORIZED
 
 
 def test_client_without_bridge_is_closed_with_try_again() -> None:

@@ -309,21 +309,23 @@ class Ledger:
             )
             return result.rowcount or 0
 
+    async def find_session_by_token(self, token: str) -> SessionRecord | None:
+        """按会话 token 反查台账（LLM 网关鉴权与租户归因；多副本下无需本进程通道）。"""
+        if not token:
+            return None
+        async with self._database.session() as session:
+            result = await session.execute(
+                select(SessionRow).where(SessionRow.token_hash == hash_token(token))
+            )
+            row = result.scalar_one_or_none()
+            return None if row is None else _session_record(row)
+
     async def get(self, session_id: str) -> SessionRecord | None:
         async with self._database.session() as session:
             row = await session.get(SessionRow, session_id)
             if row is None:
                 return None
-            return SessionRecord(
-                session_id=row.id,
-                owner=row.owner,
-                tenant_id=row.tenant_id,
-                status=row.status,
-                sandbox_id=row.sandbox_id,
-                created_at=row.created_at,
-                ended_at=row.ended_at,
-                end_reason=row.end_reason,
-            )
+            return _session_record(row)
 
     async def event_count(self, session_id: str) -> int:
         async with self._database.session() as session:
@@ -382,6 +384,19 @@ class Ledger:
         except Exception:
             self._dropped += len(batch)
             logger.exception("审计批量写入失败，丢弃 %s 条", len(batch))
+
+
+def _session_record(row: SessionRow) -> SessionRecord:
+    return SessionRecord(
+        session_id=row.id,
+        owner=row.owner,
+        tenant_id=row.tenant_id,
+        status=row.status,
+        sandbox_id=row.sandbox_id,
+        created_at=row.created_at,
+        ended_at=row.ended_at,
+        end_reason=row.end_reason,
+    )
 
 
 def _tenant_record(row: TenantRow) -> TenantRecord:

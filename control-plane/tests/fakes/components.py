@@ -41,7 +41,7 @@ async def build_test_components(
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,
         api_key=settings.llm_api_key,
-        hub=hub,
+        ledger=ledger,
         transport=llm_transport,
         metrics=metrics,
     )

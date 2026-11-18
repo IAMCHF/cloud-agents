@@ -1,4 +1,4 @@
-"""Prometheus 指标：活跃会话数、准入拒绝、LLM 转发计数。"""
+"""Prometheus 指标：活跃会话数、准入拒绝、LLM 转发计数与 token 计量。"""
 
 from __future__ import annotations
 
@@ -34,9 +34,30 @@ class Metrics:
             "LLM 网关转发的请求数",
             registry=self.registry,
         )
+        self.llm_tokens = Counter(
+            "cloud_agents_llm_tokens_total",
+            "LLM 网关计量的 token 数",
+            ["tenant", "direction"],
+            registry=self.registry,
+        )
+        self.llm_budget_rejections = Counter(
+            "cloud_agents_llm_budget_rejections_total",
+            "租户月度 token 预算拒绝次数",
+            ["tenant"],
+            registry=self.registry,
+        )
 
     def observe_active_sessions(self, count: int) -> None:
         self.active_sessions.set(count)
+
+    def observe_llm_usage(self, tenant_id: str, input_tokens: int, output_tokens: int) -> None:
+        if input_tokens:
+            self.llm_tokens.labels(tenant=tenant_id, direction="input").inc(input_tokens)
+        if output_tokens:
+            self.llm_tokens.labels(tenant=tenant_id, direction="output").inc(output_tokens)
+
+    def observe_budget_rejection(self, tenant_id: str) -> None:
+        self.llm_budget_rejections.labels(tenant=tenant_id).inc()
 
     def render(self) -> bytes:
         return generate_latest(self.registry)

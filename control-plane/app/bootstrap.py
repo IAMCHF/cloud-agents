@@ -54,7 +54,7 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,
         api_key=settings.llm_api_key,
-        hub=hub,
+        ledger=ledger,
         timeout=settings.llm_timeout_seconds,
         metrics=metrics,
     )

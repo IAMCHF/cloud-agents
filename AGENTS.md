@@ -25,9 +25,13 @@
 control-plane/       # Python + FastAPI；认证/租户/调度/LLM 网关/WSS 桥接
   app/bridge/        # stdio↔WSS 桥接（沙箱侧进程 + 控制面端点）
   app/sandbox/       # OpenSandbox 生命周期客户端
+  app/llm_gateway/   # 最小 SSE 转发（P1 无计量）
+  app/ledger/        # 会话台账 + 审计批量写（SQLAlchemy + Alembic）
+  app/api/           # 管理面 REST（会话 CRUD；P1 Bearer）
   tests/
 web/                 # React + TypeScript SPA（Vite）
   src/rpc/           # WSS JSON-RPC 客户端
+  src/state/         # Zustand store（线程/轮次/对话项/审批归约）
   src/features/      # 对话流/审批；P3 补 diff/任务列表/终端/文件树
   src/codex/         # 协议绑定：generate-json-schema → TS（入库 + CI 校验漂移）
 sandbox/
@@ -46,7 +50,7 @@ deploy/              # P1 单机编排（compose + 部署步骤，部署由用�
 - 抽象纪律：抽象必须绑定当前消费者；公开选择（默认值/外部概念）要有证据；共享状态必须有属主，不新增全局单例。
 - 依赖锁定（uv.lock / pnpm-lock.yaml，均在各自根）；根 `package.json` + `pnpm-workspace.yaml` 仅承载 workspace 与工具链（jscpd/聚合脚本），web 是 workspace 成员；带 install 脚本的依赖默认禁止，确需引入走白名单审批（如 pnpm onlyBuiltDependencies）。
 - 测试分层与门禁（覆盖率/jscpd/pre-commit/Playwright 金路径，无手测）见 `docs/实施计划.md` §5–6；模块级契约已落地：`control-plane/AGENTS.md`、`web/AGENTS.md`。
-- 构建/测试/检查命令（仓库根，聚合入口 `pnpm run check`）：控制面 `uv run --directory control-plane {ruff,mypy,pytest}`（首次 `uv sync --all-groups`）；web `pnpm -C web run {lint,typecheck,test:cov,build}`；克隆检测 `pnpm run check:dup`；协议绑定 `pnpm codex:schema` 生成、`pnpm check:codex` 校验漂移（含在 `check` 内）；E2E `pnpm -C web run e2e`（Playwright，自带 mock 后端）。首次克隆后 `pnpm install && pnpm run hooks:install` 启用 pre-commit（`.githooks/pre-commit` 调 `pnpm run check`）。完成前必须全绿，未跑写明原因。
+- 构建/测试/检查命令（仓库根，聚合入口 `pnpm run check`）：控制面 `uv run --directory control-plane {ruff,mypy,pytest}`（首次 `uv sync --all-groups`）；web `pnpm -C web run {lint,typecheck,test:cov,build}`；克隆检测 `pnpm run check:dup`；协议绑定 `pnpm codex:schema` 生成、`pnpm check:codex` 校验漂移（含在 `check` 内）；E2E `pnpm -C web run e2e`（Playwright，自带 mock 后端）；真模式 `web/playwright.real.config.ts`（需 `E2E_REAL_SESSION_URL`，见 docs/tests/本地测试指南.md）。首次克隆后 `pnpm install && pnpm run hooks:install` 启用 pre-commit（`.githooks/pre-commit` 调 `pnpm run check`）。完成前必须全绿，未跑写明原因。
 
 ## 4. 职责边界与敏感素材【硬约束】
 

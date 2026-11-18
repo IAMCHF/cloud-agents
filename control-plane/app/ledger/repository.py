@@ -13,16 +13,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.sql.elements import ColumnElement
 
+from app.auth import Principal
 from app.ledger.database import Database
-from app.ledger.models import AuditEventRow, SessionRow
+from app.ledger.models import AuditEventRow, LlmUsageRow, SessionRow, TenantRow, UserRow
 
 logger = logging.getLogger(__name__)
 
 _BATCH_SIZE = 200
 _QUEUE_SIZE = 10_000
+# 计入并发配额的会话状态：创建中与运行中。
+_ACTIVE_STATUSES = ("creating", "running")
 
 
 def hash_token(token: str) -> str:
@@ -33,11 +37,31 @@ def hash_token(token: str) -> str:
 class SessionRecord:
     session_id: str
     owner: str
+    tenant_id: str
     status: str
     sandbox_id: str | None
     created_at: datetime
     ended_at: datetime | None
     end_reason: str | None
+
+
+@dataclass(frozen=True)
+class TenantRecord:
+    tenant_id: str
+    name: str
+    max_active_sessions: int
+    monthly_token_budget: int
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class UserRecord:
+    subject: str
+    tenant_id: str
+    username: str | None
+    email: str | None
+    created_at: datetime
+    last_seen_at: datetime
 
 
 @dataclass(frozen=True)
@@ -71,16 +95,132 @@ class Ledger:
         await self._queue.put(None)
         await writer
 
-    async def create_session(self, *, session_id: str, owner: str, token: str) -> None:
+    async def create_session(
+        self, *, session_id: str, owner: str, token: str, tenant_id: str
+    ) -> None:
         async with self._database.session() as session, session.begin():
             session.add(
                 SessionRow(
                     id=session_id,
                     owner=owner,
+                    tenant_id=tenant_id,
                     status="creating",
                     token_hash=hash_token(token),
                 )
             )
+
+    async def ensure_tenant(
+        self, tenant_id: str, *, max_active_sessions: int, monthly_token_budget: int
+    ) -> TenantRecord:
+        """租户首次出现时按部署默认值建档；已存在则保留管理侧配额，不覆盖。"""
+        async with self._database.session() as session, session.begin():
+            row = await session.get(TenantRow, tenant_id)
+            if row is None:
+                row = TenantRow(
+                    id=tenant_id,
+                    name=tenant_id,
+                    max_active_sessions=max_active_sessions,
+                    monthly_token_budget=monthly_token_budget,
+                )
+                session.add(row)
+            record = _tenant_record(row)
+        return record
+
+    async def get_tenant(self, tenant_id: str) -> TenantRecord | None:
+        async with self._database.session() as session:
+            row = await session.get(TenantRow, tenant_id)
+            return None if row is None else _tenant_record(row)
+
+    async def ensure_principal(
+        self,
+        principal: Principal,
+        *,
+        tenant_max_active_sessions: int,
+        tenant_monthly_token_budget: int,
+    ) -> UserRecord:
+        """登录即建档：租户不存在按默认配额创建；用户按 subject upsert 并刷新 last_seen_at。"""
+        async with self._database.session() as session, session.begin():
+            if await session.get(TenantRow, principal.tenant_id) is None:
+                session.add(
+                    TenantRow(
+                        id=principal.tenant_id,
+                        name=principal.tenant_id,
+                        max_active_sessions=tenant_max_active_sessions,
+                        monthly_token_budget=tenant_monthly_token_budget,
+                    )
+                )
+            now = datetime.now(UTC)
+            row = await session.get(UserRow, principal.subject)
+            if row is None:
+                row = UserRow(
+                    subject=principal.subject,
+                    tenant_id=principal.tenant_id,
+                    username=principal.username,
+                    email=principal.email,
+                    created_at=now,
+                    last_seen_at=now,
+                )
+                session.add(row)
+            else:
+                row.tenant_id = principal.tenant_id
+                row.username = principal.username
+                row.email = principal.email
+                row.last_seen_at = now
+            record = _user_record(row)
+        return record
+
+    async def record_usage(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        async with self._database.session() as session, session.begin():
+            session.add(
+                LlmUsageRow(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    model=model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            )
+
+    async def usage_total(self, tenant_id: str, *, since: datetime) -> int:
+        """租户在 since 之后的 token 总量（输入+输出），用于月度预算判定。"""
+        async with self._database.session() as session:
+            result = await session.execute(
+                select(
+                    func.coalesce(func.sum(LlmUsageRow.input_tokens + LlmUsageRow.output_tokens), 0)
+                ).where(LlmUsageRow.tenant_id == tenant_id, LlmUsageRow.created_at >= since)
+            )
+            return int(result.scalar_one())
+
+    async def active_count(self) -> int:
+        return await self._count_sessions()
+
+    async def active_count_for_tenant(self, tenant_id: str) -> int:
+        return await self._count_sessions(tenant_id=tenant_id)
+
+    async def active_count_for_owner(self, owner: str) -> int:
+        return await self._count_sessions(owner=owner)
+
+    async def _count_sessions(
+        self, *, tenant_id: str | None = None, owner: str | None = None
+    ) -> int:
+        conditions: list[ColumnElement[bool]] = [SessionRow.status.in_(_ACTIVE_STATUSES)]
+        if tenant_id is not None:
+            conditions.append(SessionRow.tenant_id == tenant_id)
+        if owner is not None:
+            conditions.append(SessionRow.owner == owner)
+        async with self._database.session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(SessionRow).where(*conditions)
+            )
+            return int(result.scalar_one())
 
     async def mark_running(self, session_id: str, sandbox_id: str) -> None:
         async with self._database.session() as session, session.begin():
@@ -120,6 +260,7 @@ class Ledger:
             return SessionRecord(
                 session_id=row.id,
                 owner=row.owner,
+                tenant_id=row.tenant_id,
                 status=row.status,
                 sandbox_id=row.sandbox_id,
                 created_at=row.created_at,
@@ -184,3 +325,24 @@ class Ledger:
         except Exception:
             self._dropped += len(batch)
             logger.exception("审计批量写入失败，丢弃 %s 条", len(batch))
+
+
+def _tenant_record(row: TenantRow) -> TenantRecord:
+    return TenantRecord(
+        tenant_id=row.id,
+        name=row.name,
+        max_active_sessions=row.max_active_sessions,
+        monthly_token_budget=row.monthly_token_budget,
+        created_at=row.created_at,
+    )
+
+
+def _user_record(row: UserRow) -> UserRecord:
+    return UserRecord(
+        subject=row.subject,
+        tenant_id=row.tenant_id,
+        username=row.username,
+        email=row.email,
+        created_at=row.created_at,
+        last_seen_at=row.last_seen_at,
+    )

@@ -63,8 +63,15 @@ async def create_session(
 ) -> SessionCreateResponse:
     settings = _settings(request)
     manager = _manager(request)
+    ledger = _ledger(request)
+    # 登录即建档：租户按部署默认配额创建，用户刷新 last_seen_at；准入在 T3 改为查库。
+    await ledger.ensure_principal(
+        principal,
+        tenant_max_active_sessions=settings.tenant_default_max_active_sessions,
+        tenant_monthly_token_budget=settings.tenant_default_monthly_token_budget,
+    )
     try:
-        handle = await manager.create_session(principal.subject)
+        handle = await manager.create_session(principal.subject, principal.tenant_id)
     except AdmissionRejectedError as exc:
         metrics = _metrics(request)
         if metrics is not None:

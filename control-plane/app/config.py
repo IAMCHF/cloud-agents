@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     oidc_jwks_cache_seconds: float = 300.0
     oidc_http_timeout_seconds: float = 5.0
 
+    # 租户默认配额：租户首次出现时按此建档（0 = 不限制）。
+    tenant_default_max_active_sessions: int = 2
+    tenant_default_monthly_token_budget: int = 0
+
     # OpenSandbox 生命周期 API。
     opensandbox_base_url: str = "http://127.0.0.1:8080"
     opensandbox_api_key: str = ""

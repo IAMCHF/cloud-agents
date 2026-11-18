@@ -51,7 +51,7 @@ async def test_create_session_injects_env_and_volume(ledger: Ledger, tmp_path: P
     hub = SessionHub()
     manager = _manager(tmp_path, ledger, osb, hub)
 
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     payload = osb.created[0]
     assert payload["image"] == {"uri": "img:test"}
@@ -78,23 +78,24 @@ async def test_create_session_injects_env_and_volume(ledger: Ledger, tmp_path: P
     record = await ledger.get(handle.session_id)
     assert record is not None and record.status == "running"
     assert record.sandbox_id == "sb-1"
+    assert record.tenant_id == "default"
     assert hub.get(handle.session_id) is not None
 
 
 async def test_second_session_for_same_owner_is_rejected(ledger: Ledger, tmp_path: Path) -> None:
     osb = FakeOpenSandbox()
     manager = _manager(tmp_path, ledger, osb, SessionHub())
-    await manager.create_session("alice")
+    await manager.create_session("alice", "default")
 
     with pytest.raises(AdmissionRejectedError):
-        await manager.create_session("alice")
+        await manager.create_session("alice", "default")
 
 
 async def test_stop_session_deletes_sandbox_and_ends_record(ledger: Ledger, tmp_path: Path) -> None:
     osb = FakeOpenSandbox()
     hub = SessionHub()
     manager = _manager(tmp_path, ledger, osb, hub)
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     await manager.stop_session(handle.session_id)
 
@@ -112,7 +113,7 @@ async def test_bridge_detach_marks_exited_when_sandbox_is_gone(
     osb = FakeOpenSandbox()
     hub = SessionHub()
     manager = _manager(tmp_path, ledger, osb, hub)
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     osb.state = "Terminated"
     await manager.on_bridge_detached(handle.session_id)
@@ -126,7 +127,7 @@ async def test_bridge_detach_marks_exited_when_sandbox_is_gone(
 async def test_bridge_detach_keeps_running_session(ledger: Ledger, tmp_path: Path) -> None:
     osb = FakeOpenSandbox()
     manager = _manager(tmp_path, ledger, osb, SessionHub())
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     await manager.on_bridge_detached(handle.session_id)
 
@@ -137,7 +138,7 @@ async def test_bridge_detach_keeps_running_session(ledger: Ledger, tmp_path: Pat
 async def test_resume_restarts_paused_sandbox(ledger: Ledger, tmp_path: Path) -> None:
     osb = FakeOpenSandbox()
     manager = _manager(tmp_path, ledger, osb, SessionHub())
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     osb.state = "Paused"
     info = await manager.resume_session(handle.session_id)
@@ -161,7 +162,7 @@ async def test_pvc_volume_is_created_per_session_on_kubernetes(
         workspace_pvc_size="10Gi",
     )
 
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     volume = osb.created[0]["volumes"][0]
     assert volume["mountPath"] == "/workspace"
@@ -187,7 +188,7 @@ async def test_pvc_volume_omits_empty_storage_class(ledger: Ledger, tmp_path: Pa
         workspace_pvc_storage_class="",
     )
 
-    await manager.create_session("alice")
+    await manager.create_session("alice", "default")
 
     assert "storageClass" not in osb.created[0]["volumes"][0]["pvc"]
 
@@ -202,7 +203,7 @@ async def test_resume_paused_rejected_on_kubernetes(ledger: Ledger, tmp_path: Pa
         sandbox_runtime="kubernetes",
         volume_backend="pvc",
     )
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     osb.state = "Paused"
     with pytest.raises(OpenSandboxError, match="冷恢复"):
@@ -213,7 +214,7 @@ async def test_resume_paused_rejected_on_kubernetes(ledger: Ledger, tmp_path: Pa
 async def test_resume_rejects_terminated_sandbox(ledger: Ledger, tmp_path: Path) -> None:
     osb = FakeOpenSandbox()
     manager = _manager(tmp_path, ledger, osb, SessionHub())
-    handle = await manager.create_session("alice")
+    handle = await manager.create_session("alice", "default")
 
     osb.state = "Terminated"
     with pytest.raises(OpenSandboxError, match="不可恢复"):
@@ -239,7 +240,7 @@ async def test_create_session_injects_model_limits(ledger: Ledger, tmp_path: Pat
         codex_context_window=100000,
     )
 
-    await manager.create_session("alice")
+    await manager.create_session("alice", "default")
 
     env = osb.created[0]["env"]
     assert env["CODEX_MODEL"] == "deepseek-flash"
@@ -257,7 +258,7 @@ async def test_network_policy_parses_allow_list(ledger: Ledger, tmp_path: Path) 
         sandbox_egress_allow="api.example.com,*.corp:443,10.0.0.0/8",
     )
 
-    await manager.create_session("alice")
+    await manager.create_session("alice", "default")
 
     rules = osb.created[0]["networkPolicy"]["egress"]
     assert {"action": "allow", "target": "api.example.com"} in rules
@@ -275,7 +276,7 @@ async def test_network_policy_parses_ip_and_ipv6_ports(ledger: Ledger, tmp_path:
         sandbox_egress_allow="1.2.3.4:443,2001:db8::1,[2001:db8::2]:8443,192.168.0.0/16",
     )
 
-    await manager.create_session("alice")
+    await manager.create_session("alice", "default")
 
     rules = osb.created[0]["networkPolicy"]["egress"]
     assert {"action": "allow", "target": "1.2.3.4", "ports": [443]} in rules

@@ -60,7 +60,7 @@ class SandboxManager:
     def admission(self) -> AdmissionController:
         return self._admission
 
-    async def create_session(self, owner: str) -> SessionHandle:
+    async def create_session(self, owner: str, tenant_id: str) -> SessionHandle:
         session_id = f"s-{uuid.uuid4().hex}"
         token = secrets.token_urlsafe(32)
 
@@ -73,7 +73,9 @@ class SandboxManager:
             await self._client.wait_until_running(
                 created.id, timeout=self._settings.sandbox_start_timeout_seconds
             )
-            await self._ledger.create_session(session_id=session_id, owner=owner, token=token)
+            await self._ledger.create_session(
+                session_id=session_id, owner=owner, token=token, tenant_id=tenant_id
+            )
             await self._ledger.mark_running(session_id, created.id)
         except BaseException:
             if sandbox_id is not None:

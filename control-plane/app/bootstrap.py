@@ -28,6 +28,7 @@ class Components:
 
     async def aclose(self) -> None:
         self.hub.on_bridge_detached = None
+        self.hub.on_audit = None
         await self.gateway.aclose()
         await self.client.aclose()
         await self.ledger.stop()
@@ -47,6 +48,8 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     )
     manager = SandboxManager(settings=settings, hub=hub, ledger=ledger, client=client)
     hub.on_bridge_detached = manager.on_bridge_detached
+    # 多客户端连接事件与审批响应归因落审计（批量异步写）。
+    hub.on_audit = ledger.submit_event
     metrics = Metrics()
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,

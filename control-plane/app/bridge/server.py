@@ -41,14 +41,17 @@ async def _authenticate(websocket: WebSocket, session_id: str, token: str) -> Se
 
 async def _authenticate_client(
     websocket: WebSocket, session_id: str, token: str, access_token: str
-) -> SessionChannel | None:
-    """客户端连接：会话 token 定位通道；OIDC 模式再校验用户身份与会话属主。"""
+) -> tuple[SessionChannel, str] | None:
+    """客户端连接：会话 token 定位通道；OIDC 模式再校验用户身份与会话属主。
+
+    返回通道与该连接的审计主体（actor）：token 模式回落到会话属主。
+    """
     channel = await _authenticate(websocket, session_id, token)
     if channel is None:
         return None
     settings = getattr(websocket.app.state, "settings", None)
     if not isinstance(settings, Settings) or settings.auth_mode != "oidc":
-        return channel
+        return channel, channel.owner
     provider = getattr(websocket.app.state, "oidc", None)
     if not isinstance(provider, OidcProvider):
         await websocket.close(code=CLOSE_UNAUTHORIZED, reason="OIDC 未配置")
@@ -61,7 +64,7 @@ async def _authenticate_client(
     if principal.subject != channel.owner:
         await websocket.close(code=CLOSE_FORBIDDEN, reason="not session owner")
         return None
-    return channel
+    return channel, principal.subject
 
 
 @router.websocket("/ws/bridge/{session_id}")
@@ -94,19 +97,19 @@ async def client_endpoint(
     access_token: Annotated[str, Query()] = "",
 ) -> None:
     hub = _hub(websocket)
-    channel = await _authenticate_client(websocket, session_id, token, access_token)
-    if channel is None:
+    authenticated = await _authenticate_client(websocket, session_id, token, access_token)
+    if authenticated is None:
         return
-    if not await hub.attach_client(channel, websocket):
-        return
+    channel, actor = authenticated
+    connection_id = await hub.attach_client(channel, websocket, actor=actor)
     try:
         while True:
             frame = await websocket.receive_text()
-            await hub.from_client(channel, frame)
+            await hub.from_client(channel, connection_id, frame)
     except WebSocketDisconnect:
         pass
     except HubError as exc:
         logger.info("会话 %s 转发失败：%s", session_id, exc)
         await websocket.close(code=CLOSE_NO_BRIDGE, reason="sandbox bridge not connected")
     finally:
-        await hub.detach_client(channel, websocket)
+        await hub.detach_client(channel, connection_id)

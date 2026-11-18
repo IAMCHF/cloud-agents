@@ -24,7 +24,7 @@
 
 ## 开发机自测
 
-不依赖内网的完整链路验证（OpenSandbox + 真实 codex）见 `docs/本地测试.md`。
+不依赖内网的完整链路验证（OpenSandbox + 真实 codex）见 `docs/tests/本地测试指南.md`。
 
 ## 已知边界（P1）
 

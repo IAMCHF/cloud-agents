@@ -34,7 +34,8 @@ sandbox/
   images/            # 镜像模板：pin codex + bridge + 工具链，非 root
   opensandbox/       # OpenSandbox 配置
   egress/            # egress 白名单策略
-docs/                # 架构决策、实施计划、客户端对接说明
+docs/                # 架构决策、实施计划、客户端对接说明（计划/设计）
+docs/tests/          # 测试指南与验收报告（与计划分离，见 docs/tests/README.md）
 deploy/              # P1 单机编排（compose + 部署步骤，部署由用户操作）
 .githooks/           # 提交门禁（pre-commit → pnpm run check）
 ```

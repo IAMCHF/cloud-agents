@@ -146,6 +146,70 @@ async def test_resume_restarts_paused_sandbox(ledger: Ledger, tmp_path: Path) ->
     assert info.state == "Running"
 
 
+async def test_pvc_volume_is_created_per_session_on_kubernetes(
+    ledger: Ledger, tmp_path: Path
+) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(
+        tmp_path,
+        ledger,
+        osb,
+        SessionHub(),
+        sandbox_runtime="kubernetes",
+        volume_backend="pvc",
+        workspace_pvc_storage_class="standard",
+        workspace_pvc_size="10Gi",
+    )
+
+    handle = await manager.create_session("alice")
+
+    volume = osb.created[0]["volumes"][0]
+    assert volume["mountPath"] == "/workspace"
+    assert "host" not in volume
+    assert volume["pvc"] == {
+        "claimName": f"ws-{handle.session_id}",
+        "createIfNotExists": True,
+        "deleteOnSandboxTermination": False,
+        "storage": "10Gi",
+        "storageClass": "standard",
+    }
+
+
+async def test_pvc_volume_omits_empty_storage_class(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(
+        tmp_path,
+        ledger,
+        osb,
+        SessionHub(),
+        sandbox_runtime="kubernetes",
+        volume_backend="pvc",
+        workspace_pvc_storage_class="",
+    )
+
+    await manager.create_session("alice")
+
+    assert "storageClass" not in osb.created[0]["volumes"][0]["pvc"]
+
+
+async def test_resume_paused_rejected_on_kubernetes(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(
+        tmp_path,
+        ledger,
+        osb,
+        SessionHub(),
+        sandbox_runtime="kubernetes",
+        volume_backend="pvc",
+    )
+    handle = await manager.create_session("alice")
+
+    osb.state = "Paused"
+    with pytest.raises(OpenSandboxError, match="冷恢复"):
+        await manager.resume_session(handle.session_id)
+    assert osb.resumed == []
+
+
 async def test_resume_rejects_terminated_sandbox(ledger: Ledger, tmp_path: Path) -> None:
     osb = FakeOpenSandbox()
     manager = _manager(tmp_path, ledger, osb, SessionHub())

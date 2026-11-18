@@ -26,7 +26,8 @@
 ## 开发机自测
 
 不依赖内网的完整链路验证（OpenSandbox + 真实 codex）见 `docs/tests/本地测试指南.md`；
-compose + Postgres 17 的实跑记录见 `docs/tests/2026-11-18-P1-compose与Postgres验证.md`。
+compose + Postgres 17 的实跑记录见 `docs/tests/2026-11-18-P1-compose与Postgres验证.md`；
+Kubernetes 路径（kind + PVC + K8s 运行时）见 `deploy/k8s/README.md`。
 
 ## 已知边界（P1）
 

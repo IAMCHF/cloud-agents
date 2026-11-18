@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-agents-config
+  namespace: cloud-agents
+data:
+  PUBLIC_BASE_URL: http://control-plane.cloud-agents.svc.cluster.local:8000
+  P1_OWNER: local-user
+  OPENSANDBOX_BASE_URL: http://opensandbox-server.opensandbox-system.svc.cluster.local
+  SANDBOX_IMAGE: cloud-agents/sandbox:0.1.0
+  SANDBOX_RUNTIME: kubernetes
+  VOLUME_BACKEND: pvc
+  # 留空用集群默认 StorageClass；非 kind 集群按实际值改。
+  WORKSPACE_PVC_STORAGE_CLASS: ""
+  WORKSPACE_PVC_SIZE: 1Gi
+  SANDBOX_NETWORK_DEFAULT_ACTION: deny
+  SANDBOX_EGRESS_ALLOW: ""
+  SANDBOX_CPU: "1"
+  SANDBOX_MEMORY: 1Gi
+  SANDBOX_TIMEOUT_SECONDS: "3600"
+  SANDBOX_START_TIMEOUT_SECONDS: "180"
+  MAX_ACTIVE_SESSIONS: "4"
+  LLM_UPSTREAM_BASE_URL: https://api.deepseek.com
+  LLM_TIMEOUT_SECONDS: "600"
+  CODEX_MODEL: deepseek-flash
+  AUDIT_FLUSH_INTERVAL_SECONDS: "0.2"

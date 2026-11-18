@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,10 +42,14 @@ class Settings(BaseSettings):
     codex_sandbox_mode: str = "danger-full-access"
     codex_approval_policy: str = "on-request"
 
-    # 用户卷：host 挂载（Docker）或平台命名卷（K8s）。
+    # 用户卷：host 挂载（Docker）或平台命名卷（K8s PVC / Docker named volume）。
+    sandbox_runtime: Literal["docker", "kubernetes"] = "docker"
     volume_backend: Literal["host", "pvc"] = "host"
     workspace_host_root: str = ""
     workspace_mount_path: str = "/workspace"
+    # PVC 由 OpenSandbox 按 claimName 自动创建；留空 storageClass 用集群默认。
+    workspace_pvc_storage_class: str = ""
+    workspace_pvc_size: str = "5Gi"
 
     # LLM 网关：真 key 只在这里，沙箱只拿会话 token。
     llm_upstream_base_url: str = ""
@@ -73,6 +78,17 @@ class Settings(BaseSettings):
     @property
     def llm_public_base_url(self) -> str:
         return f"{self.public_base_url.rstrip('/')}/llm/v1"
+
+    @property
+    def sandbox_supports_pause(self) -> bool:
+        """K8s 默认没有 snapshot registry，pause 会 PauseFailed；P3 走冷恢复。"""
+        return self.sandbox_runtime == "docker"
+
+    @model_validator(mode="after")
+    def _validate_runtime(self) -> Settings:
+        if self.sandbox_runtime == "kubernetes" and self.volume_backend != "pvc":
+            raise ValueError("sandbox_runtime=kubernetes 时必须 volume_backend=pvc")
+        return self
 
 
 @lru_cache

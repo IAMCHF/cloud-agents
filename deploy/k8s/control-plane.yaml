@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  namespace: cloud-agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: control-plane
+  template:
+    metadata:
+      labels:
+        app: control-plane
+    spec:
+      initContainers:
+        - name: wait-postgres
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "until pg_isready -h postgres -U postgres; do sleep 2; done"]
+      containers:
+        - name: control-plane
+          image: cloud-agents/control-plane:p15
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: cloud-agents-config
+          env:
+            - name: P1_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-agents-secrets
+                  key: p1-auth-token
+            - name: OPENSANDBOX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-agents-secrets
+                  key: opensandbox-api-key
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-agents-secrets
+                  key: llm-api-key
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cloud-agents-secrets
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: postgresql+asyncpg://postgres:$(POSTGRES_PASSWORD)@postgres:5432/cloud_agents
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  namespace: cloud-agents
+spec:
+  selector:
+    app: control-plane
+  ports:
+    - port: 8000
+      targetPort: 8000

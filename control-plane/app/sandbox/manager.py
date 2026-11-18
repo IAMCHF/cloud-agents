@@ -26,6 +26,7 @@ from app.sandbox.client import OpenSandboxClient, OpenSandboxError, SandboxInfo,
 logger = logging.getLogger(__name__)
 
 _WORKSPACE_VOLUME = "workspace"
+_WORKSPACE_CLAIM_PREFIX = "ws-"
 _CODEX_HOME = "/home/agent/.codex"
 
 
@@ -112,6 +113,11 @@ class SandboxManager:
         """P1 resume = 重连同一沙箱（空闲销毁与跨沙箱挂卷恢复属 P3）。"""
         info = await self.sandbox_status(session_id)
         if info.state == "Paused":
+            if not self._settings.sandbox_supports_pause:
+                raise OpenSandboxError(
+                    "当前运行时（kubernetes）未配置快照 registry，pause 不可恢复；"
+                    "P3 使用冷恢复（销毁 + 卷持久化 + 重建）"
+                )
             await self._client.resume(info.id)
             info = await self._client.wait_until_running(
                 info.id, timeout=self._settings.sandbox_start_timeout_seconds
@@ -177,13 +183,37 @@ class SandboxManager:
             add(target, port)
         return {"defaultAction": "deny", "egress": rules}
 
+    def _workspace_volume(self, session_id: str) -> dict[str, Any]:
+        settings = self._settings
+        if settings.volume_backend == "host":
+            if not settings.workspace_host_root:
+                raise OpenSandboxError("未配置 workspace_host_root，无法挂载用户卷")
+            host_path = f"{settings.workspace_host_root.rstrip('/')}/{session_id}"
+            return {
+                "name": _WORKSPACE_VOLUME,
+                "mountPath": settings.workspace_mount_path,
+                "host": {"path": host_path},
+            }
+
+        # PVC 由 OpenSandbox 按 claimName 自动创建；claim 与 session 一一对应，
+        # 沙箱销毁后保留，供 P3 冷恢复/归档复用。
+        pvc: dict[str, Any] = {
+            "claimName": f"{_WORKSPACE_CLAIM_PREFIX}{session_id}",
+            "createIfNotExists": True,
+            "deleteOnSandboxTermination": False,
+        }
+        if settings.workspace_pvc_size:
+            pvc["storage"] = settings.workspace_pvc_size
+        if settings.workspace_pvc_storage_class:
+            pvc["storageClass"] = settings.workspace_pvc_storage_class
+        return {
+            "name": _WORKSPACE_VOLUME,
+            "mountPath": settings.workspace_mount_path,
+            "pvc": pvc,
+        }
+
     def _spec(self, session_id: str, token: str) -> SandboxSpec:
         settings = self._settings
-        if settings.volume_backend != "host":
-            raise OpenSandboxError("P1 仅验证 host 卷挂载；pvc 字段待 P2 按实际集群复核")
-        if not settings.workspace_host_root:
-            raise OpenSandboxError("未配置 workspace_host_root，无法挂载用户卷")
-        host_path = f"{settings.workspace_host_root.rstrip('/')}/{session_id}"
         return SandboxSpec(
             image=settings.sandbox_image,
             entrypoint=["python", "-m", "app.bridge"],
@@ -209,13 +239,7 @@ class SandboxManager:
                 "CODEX_SANDBOX_MODE": settings.codex_sandbox_mode,
                 "CODEX_APPROVAL_POLICY": settings.codex_approval_policy,
             },
-            volumes=[
-                {
-                    "name": _WORKSPACE_VOLUME,
-                    "mountPath": settings.workspace_mount_path,
-                    "host": {"path": host_path},
-                }
-            ],
+            volumes=[self._workspace_volume(session_id)],
             cpu=settings.sandbox_cpu,
             memory=settings.sandbox_memory,
             timeout_seconds=settings.sandbox_timeout_seconds,

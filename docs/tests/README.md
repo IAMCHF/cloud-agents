@@ -13,6 +13,7 @@
 | [2026-11-18 P1 冷恢复实验](2026-11-18-P1-冷恢复实验.md) | 一次性记录 | L4：销毁→新沙箱挂卷→thread/resume 可行（PASS）；现状缺口与 P3 产品化清单 |
 | [2026-11-18 P1 简化基准](2026-11-18-P1-简化基准.md) | 一次性记录 | L6 简化版：准入对账、N=8 并发资源/时延、三种 resume 时延；脚本 bench/ 可复跑 |
 | [2026-11-18 P1 compose 与 Postgres 验证](2026-11-18-P1-compose与Postgres验证.md) | 一次性记录 | L7 开发机部分：Postgres 17 迁移、compose 全栈实跑、3 处阻断修复、卷/台账/egress 证据 |
+| [2026-11-18 P0 K8s/NFS/OIDC 可行性](2026-11-18-P0-K8s与NFS可行性.md) | 一次性记录 | kind 上 OpenSandbox 生命周期与 egress、pause 快照缺口、NFSv4 SQLite 锁、Keycloak OIDC、资源占用 |
 
 可执行用例不在本目录，代码位置：
 

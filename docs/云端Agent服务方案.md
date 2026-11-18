@@ -40,7 +40,7 @@ Web 前端（同一协议的渲染层，WSS）──────────┘ 
 | 沙箱基础设施 | OpenSandbox（Docker 运行时起步，K8s 演进） | Apache-2.0 | 阿里内部生产日均百万级沙箱；2026-10 被 AAIF 收录（[报道](https://m.toutiao.com/article/7700873824409092623/)）；暂停/恢复、egress 白名单、Ingress 预览、execd 终端/文件 API 原生自带；**Docker 模式无 KVM 依赖** |
 | 控制面 | 自建（Python + FastAPI）：Web 服务 + WSS/SSE 网关 + 会话调度器 + LLM 网关 + Postgres | — | 认证(OIDC)/租户/RBAC/配额/审计；网关薄代理 JSON-RPC，不发明新协议 |
 | Web 前端 | React SPA（TypeScript），消费 `codex app-server generate-json-schema` → json-schema-to-typescript 生成的类型绑定（与客户端同流程） | — | 对话流/diff/审批/任务列表；终端(xterm.js+execd)、文件树、应用预览分期上 |
-| 模型 | 内网现有模型服务，经 LLM 网关按租户计量转发 | — | 沙箱内 codex 的 model_providers 指向网关；真 key 只在网关。**codex 0.167 起只支持 Responses API**（chat wire_api 已移除，2026-11-18 实测）：内网模型须提供 Responses 兼容端点，chat-only 上游需网关转换层（P2 决策，见 §7） |
+| 模型 | 内网现有模型服务，经 LLM 网关按租户计量转发 | — | 沙箱内 codex 的 model_providers 指向网关；真 key 只在网关。**codex 0.167 起只支持 Responses API**（chat wire_api 已移除，2026-11-18 实测）；内网模型 Responses 兼容（用户确认 2026-11-18），日后若引入 chat-only 第三方上游才需网关转换层（见 §7） |
 
 明确不选：Daytona（2026-06 闭源归档）、LobeChat 云沙箱（不开源）、Open WebUI 去品牌部署（许可越线）、仿冒 Codex Cloud 私有后端（闭源协议，随时失效）、E2B（自托管栈重且 Firecracker 需 KVM/裸金属；若日后有裸金属+强运维可重评）。
 
@@ -84,7 +84,7 @@ OpenSandbox 及一切服务端组件对客户端不可见。联动：同一控�
 | 活跃率假设失真 | P1 交付埋点能力 + 模拟基准，真值上线后观测回调；执行池无状态横向扩 |
 | OpenSandbox 开源版年轻（server 0.x） | 生命周期 API 是边界，可整体替换为裸 Docker/K8s，不影响客户端与前端 |
 | 内网模型并发容量不足 | 立项前先与模型服务方对容量；网关侧排队/限流兜底 |
-| 内网模型 chat-only 不兼容（codex 0.167 只支持 Responses API；智谱 `/responses` 404 实测） | 对接前确认内网模型协议（用户操作）；chat-only 上游需网关 chat→responses 转换层（P2 决策，P1 不做）；验收暂用 DeepSeek Responses 端点 |
+| 第三方 chat-only 上游不兼容（codex 0.167 只支持 Responses API；智谱 `/responses` 404 实测） | 内网模型 Responses 兼容（用户确认 2026-11-18），此风险对内网模型不成立；日后若引入 chat-only 上游需网关 chat→responses 转换层（P2 评估）；验收暂用 DeepSeek Responses 端点 |
 | 控制面单点重启丢会话（P1 对账仅标 ended，沙箱会话不可恢复） | P1 接受（重启对账已实测）；P2 HA 须设计会话路由 + 重启恢复，或明确降级策略（实施计划 §7 L8） |
 | 审批无人响应阻塞任务 | 策略可配：挂起等待 / 超时拒绝；IM 通知须私有化部署或仅发不含任务内容的提醒（公网企业微信/钉钉与 C5 冲突） |
 | codex 状态库（SQLite）在 NFS 用户卷上的锁兼容性 | **未实测**（本机 bind mount 通过，NFS 未测，实施计划 §7 L5）；不可行则状态盘本地化 + 卷归档（P3）或换卷方案 |

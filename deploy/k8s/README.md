@@ -13,6 +13,9 @@
 - **入口必须按会话粘性**：`/ws/bridge/<id>` 与 `/ws/session/<id>` 必须落在同一副本，否则
   桥接帧无法扇出给客户端。Ingress 用 `upstream-hash-by: $arg_token`（同一会话的桥接与
   客户端共用 `?token=`），不能用 `$uri`（两类路径前缀不同）。
+- **哈希漂移自愈**：副本增减会改变一致性哈希环，长连接桥接可能停在旧副本。客户端落到
+  无桥接副本时，控制面在握手阶段返回 HTTP 403（未 accept），Ingress 凭
+  `proxy-next-upstream: "error timeout http_403"` 换副本重试，直到命中持有桥接的副本。
 - 启动对账只结束创建超过 `CREATING_STALE_TIMEOUT_SECONDS` 的 `creating` 会话；`running`
   保留，等桥接/客户端重连重建通道。REST 管理面与 LLM 网关无状态，任意副本可服务。
 
@@ -72,6 +75,28 @@ kubectl -n cloud-agents get pods
 桥接与浏览器才走同一粘性入口；沙箱 egress 白名单会自动加入该主机名。
 `WORKSPACE_PVC_STORAGE_CLASS` 留空用集群默认（kind 为 `standard`）；其他集群按实际改。
 
+### 3.1 kind 宿主可达（无 80/443 端口映射时）
+
+kind 集群若创建时没配 `extraPortMappings`，宿主访问不到节点 80 端口，而沙箱 Pod 与
+浏览器又必须使用同一个 URL。开发机用「socat 代理 + CoreDNS hosts 覆盖」打通：
+
+```powershell
+# 1) 宿主 127.0.0.1:80 -> 控制面节点 80（socat 容器加入 kind 网络）
+docker run -d --name ca-ingress --network kind -p 80:80 alpine/socat `
+  tcp-listen:80,fork,reuseaddr tcp-connect:cloud-agents-dev-control-plane:80
+# 拿到代理在 kind 网络里的 IP（下面假设 172.19.0.5）
+docker inspect ca-ingress --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+
+# 2) 集群内把 nip.io 域名覆盖到代理 IP（Corefile 的 .:53 块加 hosts 段后重启 CoreDNS）
+#    hosts { <代理IP> cloud-agents.127.0.0.1.nip.io  fallthrough }
+kubectl -n kube-system edit configmap coredns
+kubectl -n kube-system rollout restart deploy/coredns
+```
+
+宿主解析 `cloud-agents.127.0.0.1.nip.io` 得到 127.0.0.1（nip.io 公共 DNS），走代理进
+Ingress；沙箱 Pod 解析同一域名得到代理 IP。生产环境直接用真实负载均衡域名即可，
+不需要这层代理。
+
 ## 4. 冒烟
 
 ```powershell
@@ -102,8 +127,9 @@ curl.exe -s -X POST http://cloud-agents.<NODE_IP>.nip.io/api/sessions `
 ## 已知边界
 
 - **pause/resume**：K8s 默认无 snapshot registry，pause 会 `PauseFailed`；P1.5 只走冷恢复设计，不用 pause。
-- 多副本依赖 Ingress 粘性（`$arg_token`）；若无 Ingress 直连 Service，桥接与客户端可能落在
-  不同副本，表现为客户端连上但收不到流式事件。
+- 多副本依赖 Ingress 粘性（`$arg_token`）；裸连 Service 时桥接与客户端可能落在不同副本，
+  表现为握手被 403 拒绝或连上后收不到流式事件。副本增减导致的哈希漂移由
+  `proxy-next-upstream` 重试自愈；桥接完全未连接时客户端需退避重试。
 - 本清单不包含 TLS、NetworkPolicy 基线、Secret 轮换与 PodSecurity；P4 补。
 - `postgres-password` 直接拼进 `DATABASE_URL`，生产口令如含 URL 特殊字符需先编码或改用完整
   `database-url` Secret 键。

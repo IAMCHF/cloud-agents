@@ -8,6 +8,9 @@ metadata:
     # 按 $arg_token 一致性哈希，保证同一会话的桥接与所有客户端 WS 落在同一副本。
     # 不能用 $uri：/ws/bridge/<id> 与 /ws/session/<id> 的 URI 不同，会被打到不同副本。
     nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_token"
+    # 客户端先落在无桥接的副本时，后端以 HTTP 403 拒绝握手；借助 next-upstream
+    # 换一个副本重试，直到命中持有该会话桥接的副本（副本增减导致哈希漂移时自愈）。
+    nginx.ingress.kubernetes.io/proxy-next-upstream: "error timeout http_403"
     # WebSocket / SSE 长连接：读放大到 1 小时，关闭响应缓冲保证流式及时下发。
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"

@@ -25,6 +25,8 @@ router = APIRouter()
 
 # 可重建通道的会话状态：创建中与运行中（ended 的 token 不再可用）。
 _ACTIVE_STATUSES = ("creating", "running")
+# 客户端先于桥接到达时短暂等待；超时则以 HTTP 403 拒绝，由 Ingress 换副本重试。
+_BRIDGE_WAIT_SECONDS = 0.3
 
 
 def _hub(websocket: WebSocket) -> SessionHub:
@@ -58,30 +60,38 @@ async def _authenticate(websocket: WebSocket, session_id: str, token: str) -> Se
     return channel
 
 
-async def _authenticate_client(
+async def _reject(websocket: WebSocket, code: int, reason: str) -> None:
+    """先 accept 再 close，让客户端拿到业务关闭码。"""
+    await websocket.accept()
+    await websocket.close(code=code, reason=reason)
+
+
+async def _authorize_client(
     websocket: WebSocket, session_id: str, token: str, access_token: str
 ) -> tuple[SessionChannel, str] | None:
-    """客户端连接：会话 token 定位通道；OIDC 模式再校验用户身份与会话属主。
+    """客户端鉴权（不 accept）：会话 token 定位通道；OIDC 模式再校验身份与会话属主。
 
     返回通道与该连接的审计主体（actor）：token 模式回落到会话属主。
+    失败路径自行 accept+close 交付业务关闭码。
     """
-    channel = await _authenticate(websocket, session_id, token)
+    channel = await _authorize(websocket, session_id, token)
     if channel is None:
+        await _reject(websocket, CLOSE_UNAUTHORIZED, "invalid session token")
         return None
     settings = getattr(websocket.app.state, "settings", None)
     if not isinstance(settings, Settings) or settings.auth_mode != "oidc":
         return channel, channel.owner
     provider = getattr(websocket.app.state, "oidc", None)
     if not isinstance(provider, OidcProvider):
-        await websocket.close(code=CLOSE_UNAUTHORIZED, reason="OIDC 未配置")
+        await _reject(websocket, CLOSE_UNAUTHORIZED, "OIDC 未配置")
         return None
     try:
         principal = await provider.verify(access_token)
     except OidcError:
-        await websocket.close(code=CLOSE_UNAUTHORIZED, reason="invalid access token")
+        await _reject(websocket, CLOSE_UNAUTHORIZED, "invalid access token")
         return None
     if principal.subject != channel.owner:
-        await websocket.close(code=CLOSE_FORBIDDEN, reason="not session owner")
+        await _reject(websocket, CLOSE_FORBIDDEN, "not session owner")
         return None
     return channel, principal.subject
 
@@ -116,10 +126,19 @@ async def client_endpoint(
     access_token: Annotated[str, Query()] = "",
 ) -> None:
     hub = _hub(websocket)
-    authenticated = await _authenticate_client(websocket, session_id, token, access_token)
+    authenticated = await _authorize_client(websocket, session_id, token, access_token)
     if authenticated is None:
         return
     channel, actor = authenticated
+    if channel.bridge is None:
+        await hub.wait_bridge(channel, _BRIDGE_WAIT_SECONDS)
+    if channel.bridge is None:
+        # 未 accept 直接关闭 → HTTP 403。Ingress 配了 proxy-next-upstream http_403，
+        # 会换一个副本重试，直到找到持有该会话桥接的副本（多副本下桥接只在一个副本）。
+        hub.drop_if_idle(channel.session_id)
+        await websocket.close(code=CLOSE_NO_BRIDGE, reason="sandbox bridge not connected")
+        return
+    await websocket.accept()
     connection_id = await hub.attach_client(channel, websocket, actor=actor)
     try:
         while True:

@@ -4,7 +4,7 @@ metadata:
   name: cloud-agents-config
   namespace: cloud-agents
 data:
-  PUBLIC_BASE_URL: http://control-plane.cloud-agents.svc.cluster.local:8000
+  PUBLIC_BASE_URL: http://cloud-agents.127.0.0.1.nip.io
   P1_OWNER: local-user
   OPENSANDBOX_BASE_URL: http://opensandbox-server.opensandbox-system.svc.cluster.local
   SANDBOX_IMAGE: cloud-agents/sandbox:0.1.0

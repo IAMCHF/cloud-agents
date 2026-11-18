@@ -126,6 +126,21 @@ class SessionHub:
             return None
         return channel
 
+    async def wait_bridge(self, channel: SessionChannel, timeout: float) -> bool:
+        """等待桥接接入（客户端可能先于桥接重连到达）；超时返回 False。"""
+        deadline = asyncio.get_running_loop().time() + timeout
+        while channel.bridge is None:
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(0.02)
+        return True
+
+    def drop_if_idle(self, session_id: str) -> None:
+        """移除无桥接且无客户端的空通道（错误副本上按台账重建出来的壳）。"""
+        channel = self._channels.get(session_id)
+        if channel is not None and channel.bridge is None and not channel.clients:
+            self._channels.pop(session_id, None)
+
     async def attach_bridge(self, channel: SessionChannel, websocket: WebSocket) -> bool:
         if channel.bridge is not None and channel.bridge is not websocket:
             await websocket.close(code=CLOSE_CONFLICT, reason="bridge already connected")

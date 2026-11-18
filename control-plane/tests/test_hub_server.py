@@ -139,8 +139,8 @@ def test_unauthorized_client_is_closed() -> None:
 def test_relays_frames_between_bridge_and_client() -> None:
     hub = SessionHub()
     with _client(hub) as client:
-        with client.websocket_connect(f"/ws/session/s1?token={TOKEN}") as web:
-            with client.websocket_connect(f"/ws/bridge/s1?token={TOKEN}") as bridge:
+        with client.websocket_connect(f"/ws/bridge/s1?token={TOKEN}") as bridge:
+            with client.websocket_connect(f"/ws/session/s1?token={TOKEN}") as web:
                 bridge.send_text('{"method":"turn/started","params":{"threadId":"t"}}')
                 message: Any = json.loads(web.receive_text())
                 assert message["method"] == "turn/started"
@@ -153,10 +153,10 @@ def test_relays_frames_between_bridge_and_client() -> None:
 def test_broadcasts_bridge_frames_to_all_clients() -> None:
     hub = SessionHub()
     with _client(hub) as client:
-        with client.websocket_connect(f"/ws/session/s1?token={TOKEN}") as first:
-            with client.websocket_connect(f"/ws/session/s1?token={TOKEN}") as second:
-                _wait_clients(hub, "s1", 2)
-                with client.websocket_connect(f"/ws/bridge/s1?token={TOKEN}") as bridge:
+        with client.websocket_connect(f"/ws/bridge/s1?token={TOKEN}") as bridge:
+            with client.websocket_connect(f"/ws/session/s1?token={TOKEN}") as first:
+                with client.websocket_connect(f"/ws/session/s1?token={TOKEN}") as second:
+                    _wait_clients(hub, "s1", 2)
                     bridge.send_text('{"method":"turn/started","params":{"threadId":"t"}}')
                     bridge.send_text('{"method":"item/agentMessage/delta","params":{"delta":"x"}}')
                     for web in (first, second):
@@ -265,8 +265,8 @@ def test_rebuilds_channel_from_ledger_on_connect() -> None:
     hub = SessionHub()
     with _client_with_settings(settings, hub) as client:
         assert hub.get("s9") is None
-        with client.websocket_connect("/ws/session/s9?token=tok-9") as web:
-            with client.websocket_connect("/ws/bridge/s9?token=tok-9") as bridge:
+        with client.websocket_connect("/ws/bridge/s9?token=tok-9") as bridge:
+            with client.websocket_connect("/ws/session/s9?token=tok-9") as web:
                 _wait_channel(hub, "s9")
                 channel = hub.get("s9")
                 assert channel is not None
@@ -281,11 +281,10 @@ def test_rebuilds_channel_from_ledger_on_connect() -> None:
             assert exc_info.value.code == CLOSE_UNAUTHORIZED
 
 
-def test_client_without_bridge_is_closed_with_try_again() -> None:
+def test_client_without_bridge_is_rejected_before_upgrade() -> None:
     hub = SessionHub()
     with _client(hub) as client:
-        with client.websocket_connect(f"/ws/session/s1?token={TOKEN}") as web:
-            web.send_text('{"id":1,"method":"initialize","params":{}}')
-            with pytest.raises(WebSocketDisconnect) as exc_info:
-                web.receive_text()
-            assert exc_info.value.code == 1013
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect(f"/ws/session/s1?token={TOKEN}"):
+                pass
+    assert exc_info.value.code == 1013

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # WebSocket 关闭码：与会话鉴权相关的自定义区间（4000–4999 归应用）。
 CLOSE_UNAUTHORIZED = 4401
+CLOSE_FORBIDDEN = 4403
 CLOSE_CONFLICT = 4409
 CLOSE_NO_BRIDGE = 1013
 

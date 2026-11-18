@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { type AuthConfig, completeLogin, getAccessToken, loadAuthConfig } from "./auth/oidc";
+import { WorkspaceEntry } from "./auth/WorkspaceEntry";
 import { ChatView } from "./features/chat/ChatView";
 import { CodexRpcClient, createWebSocketTransport } from "./rpc/client";
 import { createSessionStore, type SessionStore } from "./state/session";
@@ -8,15 +10,71 @@ interface Runtime {
   store: SessionStore;
 }
 
+type AuthState =
+  | { status: "loading" }
+  | { status: "ready"; config: AuthConfig }
+  | { status: "error"; message: string };
+
 export function App() {
-  const config = useMemo(readConfig, []);
+  const link = useMemo(readSessionLink, []);
+  const [auth, setAuth] = useState<AuthState>({ status: "loading" });
+
+  useEffect(() => {
+    if (link !== null) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const config = await loadAuthConfig();
+        if (config.mode === "oidc") {
+          await completeLogin(config);
+        }
+        if (!cancelled) {
+          setAuth({ status: "ready", config });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAuth({ status: "error", message: toMessage(error) });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [link]);
+
+  if (link !== null) {
+    return <ChatSession url={link.url} />;
+  }
+  if (auth.status === "loading") {
+    return <p className="p-8 text-sm text-muted">正在检查登录状态…</p>;
+  }
+  if (auth.status === "error") {
+    return (
+      <main className="mx-auto max-w-xl space-y-3 p-8 text-sm">
+        <h1 className="text-lg font-semibold text-foreground">Cloud Agents</h1>
+        <p role="alert" className="text-red-500">
+          {auth.message}
+        </p>
+        <button
+          type="button"
+          className="rounded bg-accent px-3 py-2 text-sm text-white"
+          onClick={() => window.location.reload()}
+        >
+          重试
+        </button>
+      </main>
+    );
+  }
+  return <WorkspaceEntry config={auth.config} />;
+}
+
+function ChatSession({ url }: { url: string }) {
   const [runtime, setRuntime] = useState<Runtime | null>(null);
 
   useEffect(() => {
-    if (config === null) {
-      return;
-    }
-    const client = new CodexRpcClient(createWebSocketTransport(config.url));
+    const client = new CodexRpcClient(createWebSocketTransport(url));
     const store = createSessionStore(client);
     setRuntime({ client, store });
     void store.getState().connect();
@@ -24,30 +82,15 @@ export function App() {
       client.dispose();
       setRuntime(null);
     };
-  }, [config]);
+  }, [url]);
 
-  if (config === null) {
-    return <SetupHint />;
-  }
   if (runtime === null) {
     return <p className="p-8 text-sm text-muted">正在连接云端会话…</p>;
   }
   return <ChatView store={runtime.store} />;
 }
 
-function SetupHint() {
-  return (
-    <main className="mx-auto max-w-xl space-y-3 p-8 text-sm text-muted">
-      <h1 className="text-lg font-semibold text-foreground">Cloud Agents</h1>
-      <p>尚未指定会话。通过会话创建接口拿到链接后打开即可，例如：</p>
-      <code className="block overflow-x-auto rounded bg-surface px-3 py-2 text-xs text-foreground">
-        /?session=&lt;id&gt;&amp;token=&lt;token&gt;
-      </code>
-    </main>
-  );
-}
-
-function readConfig(): { url: string } | null {
+function readSessionLink(): { url: string } | null {
   const params = new URLSearchParams(window.location.search);
   const session = params.get("session");
   const token = params.get("token");
@@ -55,11 +98,21 @@ function readConfig(): { url: string } | null {
     return null;
   }
   const base = params.get("ws") ?? defaultWebSocketBase();
-  const url = `${base.replace(/\/$/, "")}/ws/session/${encodeURIComponent(session)}?token=${encodeURIComponent(token)}`;
-  return { url };
+  const query = new URLSearchParams({ token });
+  const accessToken = getAccessToken();
+  if (accessToken !== null) {
+    query.set("access_token", accessToken);
+  }
+  return {
+    url: `${base.replace(/\/$/, "")}/ws/session/${encodeURIComponent(session)}?${query.toString()}`,
+  };
 }
 
 function defaultWebSocketBase(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}`;
+}
+
+function toMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

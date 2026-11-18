@@ -15,9 +15,21 @@ class Settings(BaseSettings):
     # 控制面对外基址：沙箱回连 WSS 与 LLM 网关都从这里派生。
     public_base_url: str = "http://127.0.0.1:8000"
 
-    # P1 单租户鉴权：管理面用固定 token，会话属主取配置值；P2 换 OIDC。
+    # 鉴权模式：token = P1 固定 token（开发/CI）；oidc = OIDC bearer token（P2）。
+    auth_mode: Literal["token", "oidc"] = "token"
     p1_auth_token: str = ""
     p1_owner: str = "p1-user"
+
+    # OIDC：issuer 用于发现与签名校验；client_id 供 Web SPA 走授权码 + PKCE。
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_audience: str = ""
+    oidc_scope: str = "openid profile email"
+    oidc_tenant_claim: str = "tenant"
+    oidc_username_claim: str = "preferred_username"
+    oidc_default_tenant: str = "default"
+    oidc_jwks_cache_seconds: float = 300.0
+    oidc_http_timeout_seconds: float = 5.0
 
     # OpenSandbox 生命周期 API。
     opensandbox_base_url: str = "http://127.0.0.1:8080"
@@ -88,6 +100,8 @@ class Settings(BaseSettings):
     def _validate_runtime(self) -> Settings:
         if self.sandbox_runtime == "kubernetes" and self.volume_backend != "pvc":
             raise ValueError("sandbox_runtime=kubernetes 时必须 volume_backend=pvc")
+        if self.auth_mode == "oidc" and not (self.oidc_issuer and self.oidc_client_id):
+            raise ValueError("auth_mode=oidc 时必须配置 oidc_issuer 与 oidc_client_id")
         return self
 
 

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import hmac
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from app.auth import Principal, require_principal
 from app.config import Settings
 from app.ledger import Ledger
 from app.metrics import Metrics
@@ -55,27 +56,15 @@ def _ledger(request: Request) -> Ledger:
     return ledger
 
 
-async def require_owner_token(request: Request) -> None:
-    """P1 单租户鉴权：Authorization: Bearer <P1_AUTH_TOKEN>。P2 换 OIDC。"""
-    settings = _settings(request)
-    if not settings.p1_auth_token:
-        raise HTTPException(status_code=503, detail="P1_AUTH_TOKEN 未配置")
-    authorization = request.headers.get("authorization", "")
-    token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
-    if not hmac.compare_digest(token, settings.p1_auth_token):
-        raise HTTPException(status_code=401, detail="invalid token")
-
-
-@router.post(
-    "",
-    response_model=SessionCreateResponse,
-    dependencies=[Depends(require_owner_token)],
-)
-async def create_session(request: Request) -> SessionCreateResponse:
+@router.post("", response_model=SessionCreateResponse)
+async def create_session(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> SessionCreateResponse:
     settings = _settings(request)
     manager = _manager(request)
     try:
-        handle = await manager.create_session(settings.p1_owner)
+        handle = await manager.create_session(principal.subject)
     except AdmissionRejectedError as exc:
         metrics = _metrics(request)
         if metrics is not None:
@@ -94,17 +83,19 @@ async def create_session(request: Request) -> SessionCreateResponse:
     )
 
 
-@router.get(
-    "/{session_id}",
-    response_model=SessionStatusResponse,
-    dependencies=[Depends(require_owner_token)],
-)
-async def get_session(session_id: str, request: Request) -> SessionStatusResponse:
+@router.get("/{session_id}", response_model=SessionStatusResponse)
+async def get_session(
+    session_id: str,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> SessionStatusResponse:
     ledger = _ledger(request)
     manager = _manager(request)
     record = await ledger.get(session_id)
     if record is None:
         raise HTTPException(status_code=404, detail="session not found")
+    if record.owner != principal.subject:
+        raise HTTPException(status_code=403, detail="session belongs to another user")
     sandbox_state: str | None = None
     try:
         sandbox_state = (await manager.sandbox_status(session_id)).state
@@ -118,14 +109,17 @@ async def get_session(session_id: str, request: Request) -> SessionStatusRespons
     )
 
 
-@router.delete(
-    "/{session_id}",
-    status_code=204,
-    dependencies=[Depends(require_owner_token)],
-)
-async def delete_session(session_id: str, request: Request) -> None:
+@router.delete("/{session_id}", status_code=204)
+async def delete_session(
+    session_id: str,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> None:
+    ledger = _ledger(request)
     manager = _manager(request)
-    try:
-        await manager.stop_session(session_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="session not found") from exc
+    record = await ledger.get(session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if record.owner != principal.subject:
+        raise HTTPException(status_code=403, detail="session belongs to another user")
+    await manager.stop_session(session_id)

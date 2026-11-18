@@ -3,18 +3,58 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { FakeWebSocket } from "./test/fakeWebSocket";
 
+function stubConfig(body: unknown): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    ),
+  );
+}
+
 describe("App", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     window.history.replaceState({}, "", "/");
   });
 
-  it("explains how to open a session when the URL has no token", () => {
+  it("explains how to open a session when token auth is active and the URL has no token", async () => {
     window.history.replaceState({}, "", "/");
+    stubConfig({ mode: "token" });
 
     render(<App />);
 
-    expect(screen.getByText(/尚未指定会话/)).toBeInTheDocument();
+    expect(await screen.findByText(/尚未指定会话/)).toBeInTheDocument();
+  });
+
+  it("offers OIDC login when no access token is stored", async () => {
+    window.history.replaceState({}, "", "/");
+    stubConfig({ mode: "oidc", issuer: "https://idp.test", client_id: "web" });
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "企业账号登录" })).toBeInTheDocument();
+  });
+
+  it("offers session creation after login", async () => {
+    window.history.replaceState({}, "", "/");
+    window.sessionStorage.setItem(
+      "cloud-agents.oidc.tokens",
+      JSON.stringify({ accessToken: "access-1", expiresAt: Date.now() + 60_000 }),
+    );
+    stubConfig({ mode: "oidc", issuer: "https://idp.test", client_id: "web" });
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "新建会话" })).toBeInTheDocument();
   });
 
   describe("with session parameters", () => {

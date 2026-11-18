@@ -40,3 +40,18 @@ async def test_mark_ended_is_idempotent(ledger: Ledger) -> None:
     record = await ledger.get("s2")
     assert record is not None
     assert record.end_reason == "first"
+
+
+async def test_end_stale_sessions_marks_unfinished(ledger: Ledger) -> None:
+    await ledger.create_session(session_id="s3", owner="alice", token="tok")
+    await ledger.create_session(session_id="s4", owner="alice", token="tok")
+    await ledger.mark_running("s4", "sb-1")
+    await ledger.mark_ended("s1", "stopped")
+
+    ended = await ledger.end_stale_sessions("control_plane_restart")
+
+    assert ended == 2
+    record = await ledger.get("s4")
+    assert record is not None
+    assert record.status == "ended"
+    assert record.end_reason == "control_plane_restart"

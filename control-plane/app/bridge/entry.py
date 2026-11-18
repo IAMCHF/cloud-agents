@@ -84,6 +84,12 @@ def _prepare_codex_home() -> None:
     context_window = os.environ.get("CODEX_CONTEXT_WINDOW", "").strip()
     if context_window.isdigit():
         lines.append(f"model_context_window = {context_window}")
+    sandbox_mode = os.environ.get("CODEX_SANDBOX_MODE", "").strip()
+    if sandbox_mode:
+        lines.append(f'sandbox_mode = "{sandbox_mode}"')
+    approval_policy = os.environ.get("CODEX_APPROVAL_POLICY", "").strip()
+    if approval_policy:
+        lines.append(f'approval_policy = "{approval_policy}"')
     lines.extend(
         [
             'model_provider = "cloud"',

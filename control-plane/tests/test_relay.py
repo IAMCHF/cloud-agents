@@ -206,3 +206,41 @@ async def test_connection_attempts_are_awaited_by_relay() -> None:
 
     await source.queue.put(None)
     await asyncio.wait_for(task, timeout=5)
+
+
+async def test_reuses_initialize_result_for_late_clients() -> None:
+    source = CodexSource()
+    connection = FakeConnection()
+    to_codex: list[str] = []
+
+    async def send_to_codex(frame: str) -> None:
+        to_codex.append(frame)
+
+    async def connector() -> Connection:
+        return connection
+
+    relay = Relay(
+        codex_frames=source.frames(),
+        send_to_codex=send_to_codex,
+        connector=connector,
+        sleeper=_no_sleep,
+    )
+    task = asyncio.create_task(relay.run())
+    try:
+        await _until(lambda: len(connection.sent) == 0)
+        connection.incoming.put_nowait(json.dumps({"id": 1, "method": "initialize", "params": {}}))
+        await _until(lambda: len(to_codex) == 1)
+
+        source.queue.put_nowait(json.dumps({"id": 1, "result": {"userAgent": "codex/0.167.0"}}))
+        await _until(lambda: any("codex/0.167.0" in frame for frame in connection.sent))
+
+        connection.incoming.put_nowait(json.dumps({"id": 2, "method": "initialize", "params": {}}))
+        await _until(lambda: any('"id": 2' in frame for frame in connection.sent))
+
+        assert len(to_codex) == 1, "重复 initialize 不应再次转发给 codex"
+        cached = [json.loads(frame) for frame in connection.sent if '"id": 2' in frame]
+        assert cached[0]["result"] == {"userAgent": "codex/0.167.0"}
+    finally:
+        connection.incoming.put_nowait(None)
+        source.queue.put_nowait(None)
+        await asyncio.wait_for(task, timeout=5)

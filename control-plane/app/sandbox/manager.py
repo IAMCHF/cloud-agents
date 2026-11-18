@@ -172,6 +172,8 @@ class SandboxManager:
                     if settings.codex_context_window > 0
                     else {}
                 ),
+                "CODEX_SANDBOX_MODE": settings.codex_sandbox_mode,
+                "CODEX_APPROVAL_POLICY": settings.codex_approval_policy,
             },
             volumes=[
                 {

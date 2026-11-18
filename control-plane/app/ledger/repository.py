@@ -11,9 +11,10 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 
 from app.ledger.database import Database
 from app.ledger.models import AuditEventRow, SessionRow
@@ -97,6 +98,19 @@ class Ledger:
             row.status = "ended"
             row.ended_at = datetime.now(UTC)
             row.end_reason = reason
+
+    async def end_stale_sessions(self, reason: str) -> int:
+        """控制面重启后清理残留的 creating/running（单 worker 无通道状态可恢复）。"""
+        async with self._database.session() as session, session.begin():
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(SessionRow)
+                    .where(SessionRow.status.in_(("creating", "running")))
+                    .values(status="ended", ended_at=datetime.now(UTC), end_reason=reason)
+                ),
+            )
+            return result.rowcount or 0
 
     async def get(self, session_id: str) -> SessionRecord | None:
         async with self._database.session() as session:

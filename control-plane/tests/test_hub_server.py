@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -9,6 +12,8 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.bridge.hub import CLOSE_CONFLICT, CLOSE_UNAUTHORIZED, SessionHub
+from app.config import Settings
+from app.ledger import Database
 from app.main import create_app
 
 TOKEN = "session-token"
@@ -22,8 +27,19 @@ APPROVAL = json.dumps(
 
 
 def _client(hub: SessionHub) -> TestClient:
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{Path(tempfile.mkdtemp()) / 'hub.db'}",
+        public_base_url="http://127.0.0.1:1",
+    )
+
+    async def _init() -> None:
+        database = Database(settings.database_url)
+        await database.create_schema()
+        await database.dispose()
+
+    asyncio.run(_init())
     hub.create("s1", TOKEN, "alice")
-    return TestClient(create_app(hub=hub))
+    return TestClient(create_app(settings=settings, hub=hub))
 
 
 def _wait_pending(hub: SessionHub, session_id: str, request_id: str) -> None:

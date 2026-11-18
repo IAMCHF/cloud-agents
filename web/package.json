@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "check:web": "biome check . && tsc --noEmit && vitest run"
   },
   "dependencies": {
     "highlight.js": "^11.12.0",

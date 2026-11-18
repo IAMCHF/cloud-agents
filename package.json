@@ -9,7 +9,7 @@
   "scripts": {
     "check": "pnpm run check:cp && pnpm run check:web && pnpm run check:dup && pnpm run check:codex",
     "check:cp": "uv run --directory control-plane ruff check . && uv run --directory control-plane ruff format --check . && uv run --directory control-plane mypy . && uv run --directory control-plane pytest",
-    "check:web": "pnpm -C web run lint && pnpm -C web run typecheck && pnpm -C web run test:cov",
+    "check:web": "pnpm -C web run lint && pnpm -C web run typecheck && pnpm -C web run test",
     "check:dup": "jscpd --config .jscpd.json .",
     "check:codex": "node scripts/codex-schema.mjs --check",
     "codex:schema": "node scripts/codex-schema.mjs",

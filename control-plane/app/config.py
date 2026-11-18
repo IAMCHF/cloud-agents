@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     codex_model: str = ""
     codex_reasoning_effort: str = ""
     codex_context_window: int = 0
+    # 容器即隔离边界：codex 自身不再套 bwrap（容器内无 user namespace 权限）。
+    codex_sandbox_mode: str = "danger-full-access"
+    codex_approval_policy: str = "on-request"
 
     # 用户卷：host 挂载（Docker）或平台命名卷（K8s）。
     volume_backend: Literal["host", "pvc"] = "host"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from app.bridge.hub import SessionHub
@@ -10,6 +11,8 @@ from app.ledger import Database, Ledger
 from app.llm_gateway import LlmGateway
 from app.metrics import Metrics
 from app.sandbox import OpenSandboxClient, SandboxManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,6 +38,9 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     database = Database(settings.database_url)
     ledger = Ledger(database, flush_interval=settings.audit_flush_interval_seconds)
     await ledger.start()
+    stale = await ledger.end_stale_sessions("control_plane_restart")
+    if stale:
+        logger.warning("启动对账：%s 个残留会话已标记结束", stale)
     client = OpenSandboxClient(
         base_url=settings.opensandbox_base_url,
         api_key=settings.opensandbox_api_key,

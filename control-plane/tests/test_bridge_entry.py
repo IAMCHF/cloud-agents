@@ -62,6 +62,8 @@ def test_prepare_codex_home_writes_provider_config(
     monkeypatch.setenv("CODEX_MODEL", "internal-codex")
     monkeypatch.setenv("CODEX_REASONING_EFFORT", "minimal")
     monkeypatch.setenv("CODEX_CONTEXT_WINDOW", "100000")
+    monkeypatch.setenv("CODEX_SANDBOX_MODE", "danger-full-access")
+    monkeypatch.setenv("CODEX_APPROVAL_POLICY", "on-request")
 
     _prepare_codex_home()
 
@@ -72,6 +74,8 @@ def test_prepare_codex_home_writes_provider_config(
     assert 'wire_api = "responses"' in content
     assert 'model_reasoning_effort = "minimal"' in content
     assert "model_context_window = 100000" in content
+    assert 'sandbox_mode = "danger-full-access"' in content
+    assert 'approval_policy = "on-request"' in content
     assert "session-token" not in content
 
 

@@ -112,6 +112,9 @@ class Relay:
         self._outbox = _Outbox(max_buffer)
         self._pending: dict[str, Frame] = {}
         self._pending_sent: set[str] = set()
+        # codex app-server 每进程只允许 initialize 一次；缓存结果供后续客户端复用。
+        self._initialize_result: object | None = None
+        self._initialize_request_ids: set[str] = set()
         self._connection: Connection | None = None
         self._send_lock = asyncio.Lock()
         self._backoff_initial = backoff_initial
@@ -149,6 +152,7 @@ class Relay:
         async for frame in self._codex_frames:
             if not frame.strip():
                 continue
+            self._capture_initialize_result(frame)
             self._track_server_request(frame)
             await self._outbox.put(frame)
 
@@ -211,7 +215,8 @@ class Relay:
         async for frame in connection.frames():
             self._settle(frame)
             self._received += 1
-            await self._send_to_codex(frame)
+            if not await self._maybe_answer_initialize(connection, frame):
+                await self._send_to_codex(frame)
 
     async def _replay_pending(self, connection: Connection) -> None:
         """重连补发仍未决的审批请求（原先已发出的）。"""
@@ -227,6 +232,34 @@ class Relay:
         request_id = _server_request_id(frame)
         if request_id is not None:
             self._pending_sent.add(request_id)
+
+    async def _maybe_answer_initialize(self, connection: Connection, frame: Frame) -> bool:
+        """重复的 initialize 直接本地应答；首次仍转发给 codex。"""
+        data = _load(frame)
+        if not isinstance(data, dict) or data.get("method") != "initialize" or "id" not in data:
+            return False
+        request_id = str(data["id"])
+        if self._initialize_result is None:
+            self._initialize_request_ids.add(request_id)
+            return False
+        await self._send(
+            connection,
+            json.dumps({"id": data["id"], "result": self._initialize_result}),
+        )
+        return True
+
+    def _capture_initialize_result(self, frame: Frame) -> None:
+        if not self._initialize_request_ids:
+            return
+        data = _load(frame)
+        if not isinstance(data, dict) or "id" not in data or "method" in data:
+            return
+        request_id = str(data["id"])
+        if request_id not in self._initialize_request_ids:
+            return
+        self._initialize_request_ids.discard(request_id)
+        if "result" in data and "error" not in data:
+            self._initialize_result = data["result"]
 
     def _track_server_request(self, frame: Frame) -> None:
         request_id = _server_request_id(frame)

@@ -18,6 +18,8 @@ from fastapi import FastAPI
 from websockets.asyncio.client import ClientConnection, connect
 
 from app.bridge.hub import SessionHub
+from app.config import Settings
+from app.ledger import Database
 from app.main import create_app
 
 BASE = Path(__file__).resolve().parents[1]
@@ -57,10 +59,19 @@ async def _until(predicate: Callable[[], bool], timeout: float = 20.0) -> None:
         await asyncio.sleep(0.02)
 
 
-async def test_full_bridge_path_with_client_reconnect() -> None:
+async def test_full_bridge_path_with_client_reconnect(tmp_path: Path) -> None:
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'integration.db'}",
+        public_base_url="http://127.0.0.1:1",
+        p1_auth_token="",
+    )
+    database = Database(settings.database_url)
+    await database.create_schema()
+    await database.dispose()
+
     hub = SessionHub()
     hub.create(SESSION_ID, TOKEN, "alice")
-    app = create_app(hub=hub)
+    app = create_app(settings=settings, hub=hub)
 
     with _serve(app) as base:
         env = os.environ.copy()

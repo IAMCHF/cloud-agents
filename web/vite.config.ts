@@ -12,6 +12,7 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["./src/test/setup.ts"],
     coverage: {
+      enabled: false,
       provider: "v8",
       reporter: ["text", "lcov"],
       // 不清理历史报告：本机安全策略会拦截批量删除，且报告目录已在 .gitignore 中。

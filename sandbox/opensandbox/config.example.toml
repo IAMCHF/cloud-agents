@@ -16,6 +16,9 @@ execd_image = "<execd 镜像:pin>"      # 必填，按部署 pin 版本
 [docker]
 network_mode = "bridge"              # networkPolicy / egress sidecar 需要 bridge
 publish_host = "127.0.0.1"           # 端口不暴露到公网接口
+# 控制面/OpenSandbox 跑在容器内时，sandbox endpoint 返回的宿主名（P1 控制面不调用 endpoint；
+# execd/预览等 P3 能力启用前必须配好）。Docker Desktop 用 host.docker.internal，Linux 用宿主 IP。
+# host_ip = "host.docker.internal"
 no_new_privileges = true
 pids_limit = 4096
 drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]

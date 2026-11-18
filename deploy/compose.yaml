@@ -1,7 +1,7 @@
 # P1 单机编排：Postgres 17 + 控制面 + OpenSandbox（Docker 运行时）。
 # 用法（用户操作，AI 只给步骤与验收）：
-#   1. 复制仓库根 .env.example 为 .env，填 P1_AUTH_TOKEN / OPEN_SANDBOX_API_KEY / PUBLIC_BASE_URL / WORKSPACE_HOST_ROOT；
-#   2. 按执行机实际值改 deploy/opensandbox/sandbox.toml（从 sandbox/opensandbox/config.example.toml 复制，必填 execd_image 与 allowed_host_paths）；
+#   1. 复制仓库根 .env.example 为 .env，填 P1_AUTH_TOKEN / OPENSANDBOX_API_KEY / PUBLIC_BASE_URL / WORKSPACE_HOST_ROOT；
+#   2. 按执行机实际值改 sandbox.toml（从 sandbox/opensandbox/config.example.toml 复制，必填 execd_image 与 allowed_host_paths；本容器内跑需 host="0.0.0.0"，按需配 [docker].host_ip / eip）；
 #   3. docker compose -f deploy/compose.yaml --env-file .env up -d --build
 #   4. 验收：GET /healthz = ok；GET /metrics 可见 cloud_agents_active_sessions。
 name: cloud-agents
@@ -31,6 +31,8 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cloud_agents}
+      # 容器内 127.0.0.1 不是 OpenSandbox，固定走 compose 服务名（覆盖 .env 中本机调试值）。
+      OPENSANDBOX_BASE_URL: http://opensandbox:8080
     ports:
       - "8000:8000"
     depends_on:
@@ -48,16 +50,19 @@ services:
   opensandbox:
     # P1 模板：跑官方 server 包，需要宿主机 Docker socket 创建沙箱容器。
     image: python:3.12-slim
+    # 版本 pin：未经实跑的新版本不自动进入部署路径。
     command: >
-      sh -c "pip install --no-cache-dir opensandbox-server &&
+      sh -c "pip install --no-cache-dir opensandbox-server==1.2.1 &&
              opensandbox-server --config /config/sandbox.toml"
-    environment:
-      OPEN_SANDBOX_API_KEY: ${OPEN_SANDBOX_API_KEY:?请在 .env 设置 OPEN_SANDBOX_API_KEY}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # 配置文件由部署方从 sandbox/opensandbox/config.example.toml 复制并填实，路径写在 .env。
+      # api_key 由该文件 [server].api_key 提供，服务端不读 compose 环境变量。
       - ${SANDBOX_CONFIG_PATH:?请在 .env 设置 SANDBOX_CONFIG_PATH}:/config/sandbox.toml:ro
-      - ${WORKSPACE_HOST_ROOT:?请在 .env 设置 WORKSPACE_HOST_ROOT}:${WORKSPACE_HOST_ROOT}
+      # OpenSandbox 自身台账（sandbox 记录）跨容器重建保留，避免与残留沙箱失联。
+      - osbdata:/root/.opensandbox
+      # 工作区卷不需要挂进本容器：host 卷由宿主机 Docker 直接挂到沙箱，
+      # allowed_host_paths 只做字符串前缀校验（避免 Windows 路径作为容器目标）。
     ports:
       - "8080:8080"
     # 说明：沙箱容器需能回连控制面（PUBLIC_BASE_URL）；单机 compose 下通常指宿主机地址，
@@ -65,3 +70,4 @@ services:
 
 volumes:
   pgdata:
+  osbdata:

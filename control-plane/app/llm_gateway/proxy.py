@@ -195,6 +195,11 @@ class LlmGateway:
                 # 必须用解压后的字节流：raw 会把 gzip 压缩体直接透传，客户端按 UTF-8 解析即失败。
                 async for chunk in upstream_response.aiter_bytes():
                     tap.feed(chunk)
+                    # 解析到 usage 立即落库：codex 收到 response.completed 后可能马上断开，
+                    # 拖到流结束再写会因取消而丢账。
+                    if not settled and tap.usage is not None:
+                        settled = True
+                        await self._settle_usage(record, model, tap.usage)
                     yield chunk
             finally:
                 if not settled:

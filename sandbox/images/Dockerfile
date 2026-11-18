@@ -3,12 +3,18 @@
 #   docker build -f sandbox/images/Dockerfile -t cloud-agents/sandbox:0.1.0 .
 # 版本必须与 web/src/codex/codex-version.txt 一致（CI 校验会比对）。
 
-FROM node:22-slim AS codex
+ARG NODE_IMAGE=node:22-slim
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+# 内网/受限网络构建时用 --build-arg APT_MIRROR=mirrors.example.com 切换 Debian 源。
+ARG APT_MIRROR=deb.debian.org
+
+FROM ${NODE_IMAGE} AS codex
 ARG CODEX_VERSION=0.167.0
 RUN npm install --global --prefix /opt/codex "@openai/codex@${CODEX_VERSION}"
 
-FROM python:3.12-slim AS runtime
+FROM ${PYTHON_IMAGE} AS runtime
 ARG CODEX_VERSION=0.167.0
+ARG APT_MIRROR=deb.debian.org
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -17,12 +23,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CODEX_HOME=/home/agent/.codex \
     CODEX_VERSION=${CODEX_VERSION}
 
-RUN apt-get update \
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # codex npm 包是 node 启动器 + 平台原生二进制；node 从构建阶段拷入。
-COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=codex /usr/local/bin/node /usr/local/bin/node
 COPY --from=codex /opt/codex /opt/codex
 
 RUN useradd --create-home --uid 1000 --shell /bin/bash agent \

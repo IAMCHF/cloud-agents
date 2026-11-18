@@ -22,6 +22,10 @@
 - 创建会话：`POST /api/sessions`（Bearer `P1_AUTH_TOKEN`）→ 返回 `ws_url`；浏览器打开 `/?session=...&token=...` 走金路径。
 - Playwright：`pnpm -C web run e2e`（mock 模式，不需要本文件的服务）。
 
+## 开发机自测
+
+不依赖内网的完整链路验证（OpenSandbox + 真实 codex）见 `docs/本地测试.md`。
+
 ## 已知边界（P1）
 
 - Compose 是单机模板，不做 HA；控制面单 worker，进程内准入/通道状态。

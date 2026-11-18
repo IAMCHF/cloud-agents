@@ -82,3 +82,6 @@ kubeconfig
 # Playwright
 playwright-report/
 test-results/
+
+# 本机测试产物
+.local/

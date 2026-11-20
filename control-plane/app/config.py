@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     # PVC 由 OpenSandbox 按 claimName 自动创建；留空 storageClass 用集群默认。
     workspace_pvc_storage_class: str = ""
     workspace_pvc_size: str = "5Gi"
+    # codex 状态盘（CODEX_HOME）独立于工作区卷，销毁/恢复时随会话保留。
+    state_pvc_size: str = "1Gi"
 
     # LLM 网关：真 key 只在这里，沙箱只拿会话 token。
     llm_upstream_base_url: str = ""

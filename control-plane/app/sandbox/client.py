@@ -18,6 +18,10 @@ class OpenSandboxError(RuntimeError):
     """OpenSandbox 返回错误或能力不符。"""
 
 
+class SandboxNotFoundError(OpenSandboxError):
+    """沙箱不存在（已被运行时回收）。"""
+
+
 @dataclass(frozen=True)
 class SandboxSpec:
     image: str
@@ -83,6 +87,8 @@ class OpenSandboxClient:
 
     async def get(self, sandbox_id: str) -> SandboxInfo:
         response = await self._client.get(f"/v1/sandboxes/{sandbox_id}")
+        if response.status_code == 404:
+            raise SandboxNotFoundError(f"沙箱 {sandbox_id} 不存在")
         return _sandbox_info(_expect(response, {200}))
 
     async def delete(self, sandbox_id: str) -> None:

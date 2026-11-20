@@ -7,9 +7,8 @@ import pytest
 
 from app.bridge.hub import SessionHub
 from app.config import Settings
-from app.ledger import AdmissionRejectedError, Ledger
+from app.ledger import AdmissionRejectedError, Ledger, SessionStateError
 from app.sandbox import OpenSandboxClient, SandboxManager
-from app.sandbox.client import OpenSandboxError
 from tests.fakes.opensandbox import FakeOpenSandbox
 
 
@@ -74,6 +73,9 @@ async def test_create_session_injects_env_and_volume(ledger: Ledger, tmp_path: P
     volume = payload["volumes"][0]
     assert volume["mountPath"] == "/workspace"
     assert volume["host"]["path"].endswith(handle.session_id)
+    state = payload["volumes"][1]
+    assert state["mountPath"] == "/home/agent/.codex"
+    assert state["host"]["path"].endswith(f"{handle.session_id}.state")
 
     record = await ledger.get(handle.session_id)
     assert record is not None and record.status == "running"
@@ -119,9 +121,77 @@ async def test_bridge_detach_marks_exited_when_sandbox_is_gone(
     await manager.on_bridge_detached(handle.session_id)
 
     record = await ledger.get(handle.session_id)
-    assert record is not None and record.status == "ended"
+    assert record is not None and record.status == "idle"
     assert record.end_reason == "sandbox_exited"
     assert hub.get(handle.session_id) is None
+
+
+async def test_sleep_and_cold_resume_keep_volumes_and_rotate_token(
+    ledger: Ledger, tmp_path: Path
+) -> None:
+    osb = FakeOpenSandbox()
+    hub = SessionHub()
+    manager = _manager(tmp_path, ledger, osb, hub)
+    handle = await manager.create_session("alice", "default")
+    old_token = handle.session_token
+
+    assert await manager.sleep_session(handle.session_id) is True
+
+    assert osb.deleted == ["sb-1"]
+    record = await ledger.get(handle.session_id)
+    assert record is not None and record.status == "idle"
+    assert record.sandbox_id is None
+    assert hub.get(handle.session_id) is None
+    # 旧 token 仍能定位台账，但 idle 状态不再通过 WS/网关的活跃校验。
+    old_record = await ledger.find_session_by_token(old_token)
+    assert old_record is not None and old_record.status == "idle"
+
+    resumed = await manager.resume_session(handle.session_id)
+
+    assert resumed.session_token != old_token
+    assert resumed.sandbox_id == "sb-1"
+    assert len(osb.created) == 2
+    spec = osb.created[1]
+    assert spec["env"]["SESSION_TOKEN"] == resumed.session_token
+    assert [volume["mountPath"] for volume in spec["volumes"]] == [
+        "/workspace",
+        "/home/agent/.codex",
+    ]
+    record = await ledger.get(handle.session_id)
+    assert record is not None and record.status == "running"
+    assert hub.get(handle.session_id) is not None
+    # 恢复时轮换 token：旧 token 不再可查。
+    assert await ledger.find_session_by_token(old_token) is None
+    found = await ledger.find_session_by_token(resumed.session_token)
+    assert found is not None and found.session_id == handle.session_id
+
+
+async def test_sleep_is_idempotent_and_resume_requires_idle(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(tmp_path, ledger, osb, SessionHub())
+    handle = await manager.create_session("alice", "default")
+
+    with pytest.raises(SessionStateError):
+        await manager.resume_session(handle.session_id)
+
+    assert await manager.sleep_session(handle.session_id) is True
+    assert await manager.sleep_session(handle.session_id) is False
+
+
+async def test_resume_respects_same_owner_admission(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    manager = _manager(tmp_path, ledger, osb, SessionHub())
+    handle = await manager.create_session("alice", "default")
+    await manager.sleep_session(handle.session_id)
+
+    # idle 不计入活跃配额，允许同属主再建一个会话。
+    other = await manager.create_session("alice", "default")
+    with pytest.raises(AdmissionRejectedError):
+        await manager.resume_session(handle.session_id)
+
+    await manager.stop_session(other.session_id)
+    resumed = await manager.resume_session(handle.session_id)
+    assert resumed.session_id == handle.session_id
 
 
 async def test_bridge_detach_keeps_running_session(ledger: Ledger, tmp_path: Path) -> None:
@@ -133,18 +203,6 @@ async def test_bridge_detach_keeps_running_session(ledger: Ledger, tmp_path: Pat
 
     record = await ledger.get(handle.session_id)
     assert record is not None and record.status == "running"
-
-
-async def test_resume_restarts_paused_sandbox(ledger: Ledger, tmp_path: Path) -> None:
-    osb = FakeOpenSandbox()
-    manager = _manager(tmp_path, ledger, osb, SessionHub())
-    handle = await manager.create_session("alice", "default")
-
-    osb.state = "Paused"
-    info = await manager.resume_session(handle.session_id)
-
-    assert osb.resumed == ["sb-1"]
-    assert info.state == "Running"
 
 
 async def test_pvc_volume_is_created_per_session_on_kubernetes(
@@ -164,14 +222,22 @@ async def test_pvc_volume_is_created_per_session_on_kubernetes(
 
     handle = await manager.create_session("alice", "default")
 
-    volume = osb.created[0]["volumes"][0]
-    assert volume["mountPath"] == "/workspace"
-    assert "host" not in volume
-    assert volume["pvc"] == {
+    workspace, state = osb.created[0]["volumes"]
+    assert workspace["mountPath"] == "/workspace"
+    assert "host" not in workspace
+    assert workspace["pvc"] == {
         "claimName": f"ws-{handle.session_id}",
         "createIfNotExists": True,
         "deleteOnSandboxTermination": False,
         "storage": "10Gi",
+        "storageClass": "standard",
+    }
+    assert state["mountPath"] == "/home/agent/.codex"
+    assert state["pvc"] == {
+        "claimName": f"state-{handle.session_id}",
+        "createIfNotExists": True,
+        "deleteOnSandboxTermination": False,
+        "storage": "1Gi",
         "storageClass": "standard",
     }
 
@@ -190,35 +256,21 @@ async def test_pvc_volume_omits_empty_storage_class(ledger: Ledger, tmp_path: Pa
 
     await manager.create_session("alice", "default")
 
-    assert "storageClass" not in osb.created[0]["volumes"][0]["pvc"]
+    for volume in osb.created[0]["volumes"]:
+        assert "storageClass" not in volume["pvc"]
 
 
-async def test_resume_paused_rejected_on_kubernetes(ledger: Ledger, tmp_path: Path) -> None:
-    osb = FakeOpenSandbox()
-    manager = _manager(
-        tmp_path,
-        ledger,
-        osb,
-        SessionHub(),
-        sandbox_runtime="kubernetes",
-        volume_backend="pvc",
-    )
-    handle = await manager.create_session("alice", "default")
-
-    osb.state = "Paused"
-    with pytest.raises(OpenSandboxError, match="冷恢复"):
-        await manager.resume_session(handle.session_id)
-    assert osb.resumed == []
-
-
-async def test_resume_rejects_terminated_sandbox(ledger: Ledger, tmp_path: Path) -> None:
+async def test_reconcile_running_marks_missing_sandbox_idle(ledger: Ledger, tmp_path: Path) -> None:
     osb = FakeOpenSandbox()
     manager = _manager(tmp_path, ledger, osb, SessionHub())
     handle = await manager.create_session("alice", "default")
 
     osb.state = "Terminated"
-    with pytest.raises(OpenSandboxError, match="不可恢复"):
-        await manager.resume_session(handle.session_id)
+    assert await manager.reconcile_running() == 1
+
+    record = await ledger.get(handle.session_id)
+    assert record is not None and record.status == "idle"
+    assert record.end_reason == "sandbox_missing"
 
 
 async def test_unknown_session_stop_raises(ledger: Ledger, tmp_path: Path) -> None:

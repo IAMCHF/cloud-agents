@@ -53,6 +53,10 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     hub.on_bridge_detached = manager.on_bridge_detached
     # 多客户端连接事件与审批响应归因落审计（批量异步写）。
     hub.on_audit = ledger.submit_event
+    # 沙箱可能已被运行时回收：running 但沙箱不存在的会话转 idle，供冷恢复。
+    reconciled = await manager.reconcile_running()
+    if reconciled:
+        logger.warning("启动对账：%s 个会话已转为 idle（沙箱不存在）", reconciled)
     metrics = Metrics()
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,

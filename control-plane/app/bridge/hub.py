@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 CLOSE_UNAUTHORIZED = 4401
 CLOSE_FORBIDDEN = 4403
 CLOSE_CONFLICT = 4409
+CLOSE_SESSION_IDLE = 4410
+CLOSE_SESSION_ENDED = 4411
 CLOSE_NO_BRIDGE = 1013
 # 客户端出站队列积压超限：判定为慢客户端并断开，避免拖慢其它客户端与桥接。
 CLOSE_SLOW_CLIENT = 4408
@@ -199,6 +201,26 @@ class SessionHub:
             },
         )
         await link.stop()
+
+    async def close_clients(self, channel: SessionChannel, *, code: int, reason: str) -> None:
+        """休眠/结束会话时主动断开全部客户端，避免客户端挂在已销毁的沙箱上。"""
+        for connection_id in list(channel.clients):
+            link = channel.clients.pop(connection_id, None)
+            if link is None:
+                continue
+            self._audit(
+                channel.session_id,
+                "client.closed",
+                {
+                    "connection_id": link.connection_id,
+                    "actor": link.actor,
+                    "code": code,
+                    "reason": reason,
+                },
+            )
+            await link.stop()
+            with contextlib.suppress(Exception):
+                await link.websocket.close(code=code, reason=reason)
 
     async def from_bridge(self, channel: SessionChannel, frame: str) -> None:
         request_id = _server_request_id(frame)

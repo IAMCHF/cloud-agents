@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.auth import Principal, require_principal
 from app.config import Settings
-from app.ledger import AdmissionRejectedError, Ledger
+from app.ledger import AdmissionRejectedError, Ledger, SessionRecord, SessionStateError
 from app.metrics import Metrics
-from app.sandbox import OpenSandboxError, SandboxManager
+from app.sandbox import OpenSandboxError, SandboxManager, SessionHandle
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -56,6 +56,22 @@ def _ledger(request: Request) -> Ledger:
     return ledger
 
 
+async def _owned_session(ledger: Ledger, session_id: str, principal: Principal) -> SessionRecord:
+    record = await ledger.get(session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if record.owner != principal.subject:
+        raise HTTPException(status_code=403, detail="session belongs to another user")
+    return record
+
+
+def _reject_admission(request: Request, exc: AdmissionRejectedError) -> NoReturn:
+    metrics = _metrics(request)
+    if metrics is not None:
+        metrics.admission_rejections.labels(reason=exc.reason).inc()
+    raise HTTPException(status_code=429, detail=exc.reason) from exc
+
+
 @router.post("", response_model=SessionCreateResponse)
 async def create_session(
     request: Request,
@@ -73,12 +89,13 @@ async def create_session(
     try:
         handle = await manager.create_session(principal.subject, principal.tenant_id)
     except AdmissionRejectedError as exc:
-        metrics = _metrics(request)
-        if metrics is not None:
-            metrics.admission_rejections.labels(reason=exc.reason).inc()
-        raise HTTPException(status_code=429, detail=exc.reason) from exc
+        _reject_admission(request, exc)
     except OpenSandboxError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return _session_response(settings, handle)
+
+
+def _session_response(settings: Settings, handle: SessionHandle) -> SessionCreateResponse:
     return SessionCreateResponse(
         session_id=handle.session_id,
         session_token=handle.session_token,
@@ -90,6 +107,51 @@ async def create_session(
     )
 
 
+@router.post("/{session_id}/sleep", status_code=204)
+async def sleep_session(
+    session_id: str,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> None:
+    ledger = _ledger(request)
+    manager = _manager(request)
+    record = await _owned_session(ledger, session_id, principal)
+    if record.status == "ended":
+        raise HTTPException(status_code=409, detail="会话已结束")
+    try:
+        await manager.sleep_session(session_id)
+    except SessionStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OpenSandboxError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/{session_id}/resume", response_model=SessionCreateResponse)
+async def resume_session(
+    session_id: str,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> SessionCreateResponse:
+    settings = _settings(request)
+    manager = _manager(request)
+    ledger = _ledger(request)
+    await _owned_session(ledger, session_id, principal)
+    await ledger.ensure_principal(
+        principal,
+        tenant_max_active_sessions=settings.tenant_default_max_active_sessions,
+        tenant_monthly_token_budget=settings.tenant_default_monthly_token_budget,
+    )
+    try:
+        handle = await manager.resume_session(session_id)
+    except SessionStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AdmissionRejectedError as exc:
+        _reject_admission(request, exc)
+    except OpenSandboxError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return _session_response(settings, handle)
+
+
 @router.get("/{session_id}", response_model=SessionStatusResponse)
 async def get_session(
     session_id: str,
@@ -98,11 +160,7 @@ async def get_session(
 ) -> SessionStatusResponse:
     ledger = _ledger(request)
     manager = _manager(request)
-    record = await ledger.get(session_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="session not found")
-    if record.owner != principal.subject:
-        raise HTTPException(status_code=403, detail="session belongs to another user")
+    record = await _owned_session(ledger, session_id, principal)
     sandbox_state: str | None = None
     try:
         sandbox_state = (await manager.sandbox_status(session_id)).state
@@ -124,9 +182,5 @@ async def delete_session(
 ) -> None:
     ledger = _ledger(request)
     manager = _manager(request)
-    record = await ledger.get(session_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="session not found")
-    if record.owner != principal.subject:
-        raise HTTPException(status_code=403, detail="session belongs to another user")
+    await _owned_session(ledger, session_id, principal)
     await manager.stop_session(session_id)

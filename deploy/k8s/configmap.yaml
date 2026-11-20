@@ -13,6 +13,8 @@ data:
   # 留空用集群默认 StorageClass；非 kind 集群按实际值改。
   WORKSPACE_PVC_STORAGE_CLASS: ""
   WORKSPACE_PVC_SIZE: 1Gi
+  # codex 状态盘（CODEX_HOME）独立 PVC，休眠/销毁沙箱后保留供冷恢复。
+  STATE_PVC_SIZE: 1Gi
   SANDBOX_NETWORK_DEFAULT_ACTION: deny
   SANDBOX_EGRESS_ALLOW: ""
   SANDBOX_CPU: "1"

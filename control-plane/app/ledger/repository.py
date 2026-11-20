@@ -40,6 +40,10 @@ class AdmissionRejectedError(RuntimeError):
         self.reason = reason
 
 
+class SessionStateError(RuntimeError):
+    """会话状态不允许当前操作（例如非 idle 会话执行 resume）。"""
+
+
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -160,6 +164,48 @@ class Ledger:
                 )
             )
 
+    async def begin_resume(
+        self,
+        *,
+        session_id: str,
+        token: str,
+        max_active_sessions: int,
+    ) -> SessionRecord:
+        """把 idle 会话重新纳入准入并置 creating；配额校验与状态变更同一事务。"""
+        async with self._database.lock, self._database.session() as session, session.begin():
+            if self._database.dialect_name == "postgresql":
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADMISSION_LOCK_KEY}
+                )
+            row = await session.get(SessionRow, session_id)
+            if row is None:
+                raise LookupError(f"会话 {session_id} 不在台账中")
+            if row.status != "idle":
+                raise SessionStateError(f"会话状态 {row.status} 不可恢复")
+            if await self._count_sessions(session) >= max_active_sessions:
+                raise AdmissionRejectedError("达到全局活跃会话上限（max_active_sessions）")
+            tenant = await session.get(TenantRow, row.tenant_id)
+            if tenant is not None and tenant.max_active_sessions > 0:
+                tenant_active = await self._count_sessions(
+                    session, tenant_id=row.tenant_id, exclude_session_id=session_id
+                )
+                if tenant_active >= tenant.max_active_sessions:
+                    raise AdmissionRejectedError(
+                        f"租户 {row.tenant_id} 活跃会话达到上限（{tenant.max_active_sessions}）"
+                    )
+            if (
+                await self._count_sessions(session, owner=row.owner, exclude_session_id=session_id)
+                > 0
+            ):
+                raise AdmissionRejectedError("同用户已有活跃会话")
+            row.status = "creating"
+            row.token_hash = hash_token(token)
+            row.sandbox_id = None
+            row.ended_at = None
+            row.end_reason = None
+            record = _session_record(row)
+        return record
+
     async def ensure_tenant(
         self, tenant_id: str, *, max_active_sessions: int, monthly_token_budget: int
     ) -> TenantRecord:
@@ -268,12 +314,15 @@ class Ledger:
         *,
         tenant_id: str | None = None,
         owner: str | None = None,
+        exclude_session_id: str | None = None,
     ) -> int:
         conditions: list[ColumnElement[bool]] = [SessionRow.status.in_(_ACTIVE_STATUSES)]
         if tenant_id is not None:
             conditions.append(SessionRow.tenant_id == tenant_id)
         if owner is not None:
             conditions.append(SessionRow.owner == owner)
+        if exclude_session_id is not None:
+            conditions.append(SessionRow.id != exclude_session_id)
         result = await session.execute(
             select(func.count()).select_from(SessionRow).where(*conditions)
         )
@@ -286,6 +335,64 @@ class Ledger:
                 raise LookupError(f"会话 {session_id} 不在台账中")
             row.status = "running"
             row.sandbox_id = sandbox_id
+
+    async def _transition(
+        self,
+        session_id: str,
+        *,
+        from_statuses: tuple[str, ...],
+        to_status: str,
+        sandbox_id: str | None = None,
+        set_sandbox: bool = False,
+        reason: str | None = None,
+    ) -> bool:
+        values: dict[str, Any] = {"status": to_status, "end_reason": reason}
+        if set_sandbox:
+            values["sandbox_id"] = sandbox_id
+        async with self._database.session() as session, session.begin():
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(SessionRow)
+                    .where(SessionRow.id == session_id, SessionRow.status.in_(from_statuses))
+                    .values(**values)
+                ),
+            )
+            return (result.rowcount or 0) > 0
+
+    async def mark_sleeping(self, session_id: str, reason: str) -> bool:
+        """running → sleeping：先退出活跃配额，再销毁沙箱。"""
+        return await self._transition(
+            session_id,
+            from_statuses=("running",),
+            to_status="sleeping",
+            reason=reason,
+        )
+
+    async def mark_idle(self, session_id: str, reason: str) -> bool:
+        """creating/running/sleeping → idle：沙箱已不存在，卷保留供冷恢复。"""
+        return await self._transition(
+            session_id,
+            from_statuses=("creating", "running", "sleeping"),
+            to_status="idle",
+            sandbox_id=None,
+            set_sandbox=True,
+            reason=reason,
+        )
+
+    async def revert_to_running(self, session_id: str, sandbox_id: str) -> bool:
+        return await self._transition(
+            session_id,
+            from_statuses=("sleeping",),
+            to_status="running",
+            sandbox_id=sandbox_id,
+            set_sandbox=True,
+        )
+
+    async def list_sessions_by_status(self, status: str) -> list[SessionRecord]:
+        async with self._database.session() as session:
+            result = await session.execute(select(SessionRow).where(SessionRow.status == status))
+            return [_session_record(row) for row in result.scalars().all()]
 
     async def mark_ended(self, session_id: str, reason: str) -> None:
         async with self._database.session() as session, session.begin():

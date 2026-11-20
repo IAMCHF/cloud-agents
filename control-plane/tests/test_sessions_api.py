@@ -12,6 +12,14 @@ from tests.fakes.components import build_test_components
 from tests.fakes.opensandbox import FakeOpenSandbox
 
 OWNER_TOKEN = "owner-token"
+HEADERS = {"Authorization": f"Bearer {OWNER_TOKEN}"}
+
+
+def _create_session(client: TestClient) -> dict[str, str]:
+    created = client.post("/api/sessions", headers=HEADERS)
+    assert created.status_code == 200
+    body: dict[str, str] = created.json()
+    return body
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -73,3 +81,50 @@ def test_unknown_session_returns_404(tmp_path: Path) -> None:
     with _client(tmp_path, FakeOpenSandbox()) as client:
         assert client.get("/api/sessions/missing", headers=headers).status_code == 404
         assert client.delete("/api/sessions/missing", headers=headers).status_code == 404
+
+
+def test_sleep_and_resume_session(tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    headers = HEADERS
+    with _client(tmp_path, osb) as client:
+        created = _create_session(client)
+        session_id = created["session_id"]
+
+        assert client.post(f"/api/sessions/{session_id}/sleep", headers=headers).status_code == 204
+        status = client.get(f"/api/sessions/{session_id}", headers=headers)
+        assert status.json()["status"] == "idle"
+        assert status.json()["sandbox_id"] is None
+
+        # 重复休眠幂等。
+        assert client.post(f"/api/sessions/{session_id}/sleep", headers=headers).status_code == 204
+
+        resumed = client.post(f"/api/sessions/{session_id}/resume", headers=headers)
+        assert resumed.status_code == 200
+        body = resumed.json()
+        assert body["session_token"] != created["session_token"]
+        assert body["ws_url"].startswith("ws://cp:8000/ws/session/")
+        assert (
+            client.get(f"/api/sessions/{session_id}", headers=headers).json()["status"] == "running"
+        )
+
+        # 运行中不可再次 resume。
+        again = client.post(f"/api/sessions/{session_id}/resume", headers=headers)
+        assert again.status_code == 409
+
+
+def test_delete_idle_session(tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    headers = HEADERS
+    with _client(tmp_path, osb) as client:
+        created = _create_session(client)
+        session_id = created["session_id"]
+        assert client.post(f"/api/sessions/{session_id}/sleep", headers=headers).status_code == 204
+
+        assert client.delete(f"/api/sessions/{session_id}", headers=headers).status_code == 204
+        assert (
+            client.get(f"/api/sessions/{session_id}", headers=headers).json()["status"] == "ended"
+        )
+
+        # 已结束会话不可休眠/恢复。
+        assert client.post(f"/api/sessions/{session_id}/sleep", headers=headers).status_code == 409
+        assert client.post(f"/api/sessions/{session_id}/resume", headers=headers).status_code == 409

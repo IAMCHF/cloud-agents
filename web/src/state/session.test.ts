@@ -8,8 +8,14 @@ function setup() {
     if (message.method === "initialize") {
       return { id: message.id, result: { userAgent: "fake-codex/0.167.0" } };
     }
+    if (message.method === "thread/list") {
+      return { id: message.id, result: { data: [] } };
+    }
     if (message.method === "thread/start") {
       return { id: message.id, result: { thread: { id: "thr_1" } } };
+    }
+    if (message.method === "thread/resume") {
+      return { id: message.id, result: { thread: { id: "thr_old", turns: [] } } };
     }
     if (message.method === "turn/start") {
       return { id: message.id, result: { turn: { id: "turn_1" } } };
@@ -134,6 +140,93 @@ describe("session store edge cases", () => {
 
     const item = store.getState().items.find((entry) => entry.id === "item_9");
     expect(item?.text).toBe("done");
+  });
+});
+
+describe("session store threads and diff", () => {
+  it("resumes the latest thread and hydrates history", async () => {
+    const transport = new FakeTransport((message) => {
+      if (message.method === "initialize") {
+        return { id: message.id, result: { userAgent: "fake" } };
+      }
+      if (message.method === "thread/list") {
+        return {
+          id: message.id,
+          result: {
+            data: [{ id: "thr_old", name: "旧任务", preview: "历史", updatedAt: 1 }],
+          },
+        };
+      }
+      if (message.method === "thread/resume") {
+        return {
+          id: message.id,
+          result: {
+            thread: {
+              id: "thr_old",
+              turns: [
+                {
+                  items: [
+                    {
+                      id: "hist_1",
+                      type: "userMessage",
+                      content: [{ type: "text", text: "旧问题" }],
+                    },
+                    { id: "hist_2", type: "agentMessage", text: "历史回复" },
+                  ],
+                },
+              ],
+            },
+          },
+        };
+      }
+      return undefined;
+    });
+    const store = createSessionStore(new CodexRpcClient(transport));
+
+    await store.getState().connect();
+
+    expect(store.getState().threadId).toBe("thr_old");
+    expect(store.getState().items.map((item) => item.text)).toEqual(["旧问题", "历史回复"]);
+  });
+
+  it("reduces diff and plan notifications", () => {
+    const { transport, store } = setup();
+
+    transport.emit({
+      method: "turn/diff/updated",
+      params: { threadId: "thr_1", turnId: "turn_1", diff: "--- a\n+++ b\n+hello" },
+    });
+    transport.emit({
+      method: "turn/plan/updated",
+      params: {
+        threadId: "thr_1",
+        turnId: "turn_1",
+        plan: [
+          { status: "completed", step: "定位" },
+          { status: "inProgress", step: "修复" },
+        ],
+      },
+    });
+
+    expect(store.getState().diff).toContain("+hello");
+    expect(store.getState().plan).toEqual([
+      { status: "completed", step: "定位" },
+      { status: "inProgress", step: "修复" },
+    ]);
+  });
+
+  it("starts a new thread and clears the diff", async () => {
+    const { transport, store } = setup();
+    await store.getState().connect();
+    transport.emit({
+      method: "turn/diff/updated",
+      params: { threadId: "thr_1", turnId: "turn_1", diff: "+x" },
+    });
+
+    await store.getState().newThread();
+
+    expect(store.getState().diff).toBe("");
+    expect(store.getState().threadId).toBe("thr_1");
   });
 });
 

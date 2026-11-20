@@ -396,6 +396,16 @@ class Ledger:
             result = await session.execute(select(SessionRow).where(SessionRow.status == status))
             return [_session_record(row) for row in result.scalars().all()]
 
+    async def list_sessions_for_owner(self, owner: str, *, limit: int = 50) -> list[SessionRecord]:
+        async with self._database.session() as session:
+            result = await session.execute(
+                select(SessionRow)
+                .where(SessionRow.owner == owner)
+                .order_by(SessionRow.created_at.desc())
+                .limit(limit)
+            )
+            return [_session_record(row) for row in result.scalars().all()]
+
     async def list_archive_candidates(
         self,
         *,

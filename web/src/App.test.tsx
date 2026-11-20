@@ -3,16 +3,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { FakeWebSocket } from "./test/fakeWebSocket";
 
-function stubConfig(body: unknown): void {
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function stubApi(config: unknown, sessions: unknown = []): void {
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-    ),
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/auth/config")) {
+        return jsonResponse(config);
+      }
+      if (url.includes("/api/sessions")) {
+        return jsonResponse(sessions);
+      }
+      return jsonResponse({}, 404);
+    }),
   );
 }
 
@@ -28,7 +39,7 @@ describe("App", () => {
 
   it("explains how to open a session when token auth is active and the URL has no token", async () => {
     window.history.replaceState({}, "", "/");
-    stubConfig({ mode: "token" });
+    stubApi({ mode: "token" });
 
     render(<App />);
 
@@ -37,7 +48,7 @@ describe("App", () => {
 
   it("offers OIDC login when no access token is stored", async () => {
     window.history.replaceState({}, "", "/");
-    stubConfig({ mode: "oidc", issuer: "https://idp.test", client_id: "web" });
+    stubApi({ mode: "oidc", issuer: "https://idp.test", client_id: "web" });
 
     render(<App />);
 
@@ -50,7 +61,7 @@ describe("App", () => {
       "cloud-agents.oidc.tokens",
       JSON.stringify({ accessToken: "access-1", expiresAt: Date.now() + 60_000 }),
     );
-    stubConfig({ mode: "oidc", issuer: "https://idp.test", client_id: "web" });
+    stubApi({ mode: "oidc", issuer: "https://idp.test", client_id: "web" });
 
     render(<App />);
 

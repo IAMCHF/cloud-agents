@@ -4,6 +4,7 @@ import { WorkspaceEntry } from "./auth/WorkspaceEntry";
 import { ChatView } from "./features/chat/ChatView";
 import { CodexRpcClient, createWebSocketTransport } from "./rpc/client";
 import { createSessionStore, type SessionStore } from "./state/session";
+import { rememberSessionToken } from "./state/tokenStore";
 
 interface Runtime {
   client: CodexRpcClient;
@@ -45,7 +46,7 @@ export function App() {
   }, [link]);
 
   if (link !== null) {
-    return <ChatSession url={link.url} />;
+    return <ChatSession link={link} />;
   }
   if (auth.status === "loading") {
     return <p className="p-8 text-sm text-muted">正在检查登录状态…</p>;
@@ -70,11 +71,12 @@ export function App() {
   return <WorkspaceEntry config={auth.config} />;
 }
 
-function ChatSession({ url }: { url: string }) {
+function ChatSession({ link }: { link: { url: string; sessionId: string; token: string } }) {
   const [runtime, setRuntime] = useState<Runtime | null>(null);
 
   useEffect(() => {
-    const client = new CodexRpcClient(createWebSocketTransport(url));
+    rememberSessionToken(link.sessionId, link.token);
+    const client = new CodexRpcClient(createWebSocketTransport(link.url));
     const store = createSessionStore(client);
     setRuntime({ client, store });
     void store.getState().connect();
@@ -82,7 +84,7 @@ function ChatSession({ url }: { url: string }) {
       client.dispose();
       setRuntime(null);
     };
-  }, [url]);
+  }, [link]);
 
   if (runtime === null) {
     return <p className="p-8 text-sm text-muted">正在连接云端会话…</p>;
@@ -90,7 +92,7 @@ function ChatSession({ url }: { url: string }) {
   return <ChatView store={runtime.store} />;
 }
 
-function readSessionLink(): { url: string } | null {
+function readSessionLink(): { url: string; sessionId: string; token: string } | null {
   const params = new URLSearchParams(window.location.search);
   const session = params.get("session");
   const token = params.get("token");
@@ -105,6 +107,8 @@ function readSessionLink(): { url: string } | null {
   }
   return {
     url: `${base.replace(/\/$/, "")}/ws/session/${encodeURIComponent(session)}?${query.toString()}`,
+    sessionId: session,
+    token,
   };
 }
 

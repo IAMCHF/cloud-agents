@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -23,6 +24,14 @@ class SessionCreateResponse(BaseModel):
     session_token: str
     sandbox_id: str
     ws_url: str
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    status: str
+    created_at: datetime
+    ended_at: datetime | None
+    archived_at: datetime | None
 
 
 class SessionStatusResponse(BaseModel):
@@ -56,6 +65,26 @@ def _reject_admission(request: Request, exc: AdmissionRejectedError) -> NoReturn
     if metrics is not None:
         metrics.admission_rejections.labels(reason=exc.reason).inc()
     raise HTTPException(status_code=429, detail=exc.reason) from exc
+
+
+@router.get("", response_model=list[SessionSummary])
+async def list_sessions(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+    limit: int = 50,
+) -> list[SessionSummary]:
+    ledger = _ledger(request)
+    records = await ledger.list_sessions_for_owner(principal.subject, limit=max(1, min(limit, 200)))
+    return [
+        SessionSummary(
+            session_id=record.session_id,
+            status=record.status,
+            created_at=record.created_at,
+            ended_at=record.ended_at,
+            archived_at=record.archived_at,
+        )
+        for record in records
+    ]
 
 
 @router.post("", response_model=SessionCreateResponse)

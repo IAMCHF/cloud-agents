@@ -1,4 +1,4 @@
-/** 会话状态：把 Codex JSON-RPC 通知归约成对话项与审批请求。 */
+/** 会话状态：把 Codex JSON-RPC 通知归约成对话项、线程/计划与审批请求。 */
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { CodexRpcClient, JsonRpcId, JsonRpcMessage } from "../rpc/client";
@@ -9,6 +9,18 @@ export interface ChatItem {
   id: string;
   type: string;
   text: string;
+}
+
+export interface ThreadSummary {
+  id: string;
+  name: string | null;
+  preview: string;
+  updatedAt: number;
+}
+
+export interface PlanStep {
+  status: "pending" | "inProgress" | "completed";
+  step: string;
 }
 
 export interface ApprovalRequest {
@@ -24,15 +36,25 @@ export interface SessionState {
   threadId: string | null;
   turnId: string | null;
   items: ChatItem[];
+  threads: ThreadSummary[];
+  plan: PlanStep[];
+  diff: string;
   approvals: ApprovalRequest[];
   error: string | null;
   connect: () => Promise<void>;
   send: (text: string) => Promise<void>;
   decide: (request: ApprovalRequest, decision: ApprovalDecision) => void;
+  resumeThread: (threadId: string, clearApprovals?: boolean) => Promise<void>;
+  newThread: (clearApprovals?: boolean) => Promise<void>;
   handleMessage: (message: JsonRpcMessage) => void;
 }
 
 export type SessionStore = StoreApi<SessionState>;
+
+interface ThreadPayload {
+  id?: string;
+  turns?: Array<{ items?: Array<Record<string, unknown>> }>;
+}
 
 export function createSessionStore(client: CodexRpcClient): SessionStore {
   const store = createStore<SessionState>()((set, get) => ({
@@ -40,6 +62,9 @@ export function createSessionStore(client: CodexRpcClient): SessionStore {
     threadId: null,
     turnId: null,
     items: [],
+    threads: [],
+    plan: [],
+    diff: "",
     approvals: [],
     error: null,
 
@@ -49,8 +74,17 @@ export function createSessionStore(client: CodexRpcClient): SessionStore {
         await client.request("initialize", {
           clientInfo: { name: "cloud-agents-web", version: "0.1.0" },
         });
-        const started = await client.request<{ thread?: { id?: string } }>("thread/start", {});
-        set({ status: "open", threadId: started.thread?.id ?? null });
+        const listed = await client.request<{ data?: ThreadSummary[] }>("thread/list", {
+          limit: 50,
+        });
+        const threads = listed.data ?? [];
+        set({ threads });
+        const latest = threads[0];
+        if (latest === undefined) {
+          await get().newThread();
+        } else {
+          await get().resumeThread(latest.id);
+        }
       } catch (error) {
         set({ status: "error", error: toMessage(error) });
       }
@@ -69,7 +103,7 @@ export function createSessionStore(client: CodexRpcClient): SessionStore {
         type: "userMessage",
         text,
       };
-      set({ items: [...items, localItem], error: null });
+      set({ items: [...items, localItem], error: null, diff: "", plan: [] });
       try {
         const started = await client.request<{ turn?: { id?: string } }>("turn/start", {
           threadId,
@@ -87,6 +121,55 @@ export function createSessionStore(client: CodexRpcClient): SessionStore {
       set({ approvals: get().approvals.filter((item) => item.id !== request.id) });
     },
 
+    async resumeThread(threadId: string, clearApprovals = false): Promise<void> {
+      set({ status: "connecting", error: null });
+      try {
+        const result = await client.request<{ thread?: ThreadPayload }>("thread/resume", {
+          threadId,
+        });
+        const thread = result.thread ?? {};
+        const items = (thread.turns ?? []).flatMap((turn) =>
+          (turn.items ?? []).map(toChatItem).filter((item): item is ChatItem => item !== null),
+        );
+        set({
+          status: "open",
+          threadId: thread.id ?? threadId,
+          turnId: null,
+          items,
+          approvals: clearApprovals ? [] : get().approvals,
+          diff: "",
+          plan: [],
+          threads: touchThread(get().threads, thread.id ?? threadId),
+        });
+      } catch (error) {
+        set({ status: "error", error: toMessage(error) });
+        throw error;
+      }
+    },
+
+    async newThread(clearApprovals = false): Promise<void> {
+      const result = await client.request<{ thread?: { id?: string } }>("thread/start", {});
+      const id = result.thread?.id;
+      set({
+        status: "open",
+        threadId: id ?? null,
+        turnId: null,
+        items: [],
+        approvals: clearApprovals ? [] : get().approvals,
+        diff: "",
+        plan: [],
+        threads:
+          id === undefined
+            ? get().threads
+            : upsertThread(get().threads, {
+                id,
+                name: null,
+                preview: "新线程",
+                updatedAt: nowSeconds(),
+              }),
+      });
+    },
+
     handleMessage(message: JsonRpcMessage): void {
       const method = message.method;
       if (method === undefined) {
@@ -102,13 +185,29 @@ export function createSessionStore(client: CodexRpcClient): SessionStore {
         case "thread/started": {
           const threadId = asString(params.threadId);
           if (threadId !== null) {
-            set({ threadId });
+            set({
+              threadId,
+              threads: upsertThread(get().threads, {
+                id: threadId,
+                name: null,
+                preview: "新线程",
+                updatedAt: nowSeconds(),
+              }),
+            });
           }
           break;
         }
         case "turn/started": {
           const turn = asRecord(params.turn);
-          set({ turnId: asString(turn.id), status: "open" });
+          set({ turnId: asString(turn.id), status: "open", diff: "", plan: [] });
+          break;
+        }
+        case "turn/diff/updated": {
+          set({ diff: asString(params.diff) ?? "" });
+          break;
+        }
+        case "turn/plan/updated": {
+          set({ plan: toPlan(params.plan) });
           break;
         }
         case "turn/completed": {
@@ -172,13 +271,73 @@ function appendDelta(items: ChatItem[], itemId: string, delta: string): ChatItem
   return next;
 }
 
+function upsertThread(threads: ThreadSummary[], thread: ThreadSummary): ThreadSummary[] {
+  const index = threads.findIndex((item) => item.id === thread.id);
+  if (index === -1) {
+    return [thread, ...threads];
+  }
+  const next = [...threads];
+  next[index] = { ...next[index], ...thread };
+  return next;
+}
+
+function touchThread(threads: ThreadSummary[], threadId: string): ThreadSummary[] {
+  return threads.map((thread) =>
+    thread.id === threadId ? { ...thread, updatedAt: nowSeconds() } : thread,
+  );
+}
+
 function toChatItem(value: Record<string, unknown>): ChatItem | null {
   const id = asString(value.id);
   const type = asString(value.type);
   if (id === null || type === null) {
     return null;
   }
-  return { id, type, text: asString(value.text) ?? "" };
+  return { id, type, text: itemText(value) };
+}
+
+function itemText(value: Record<string, unknown>): string {
+  const text = asString(value.text);
+  if (text !== null) {
+    return text;
+  }
+  const content = value.content;
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((part) => {
+      const record = asRecord(part);
+      return asString(record.text) ?? "";
+    })
+    .join("");
+}
+
+function toPlan(value: unknown): PlanStep[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((step) => {
+      const record = asRecord(step);
+      const label = asString(record.step);
+      if (label === null) {
+        return null;
+      }
+      const rawStatus = asString(record.status);
+      const status: PlanStep["status"] =
+        rawStatus === "completed"
+          ? "completed"
+          : rawStatus === "inProgress"
+            ? "inProgress"
+            : "pending";
+      return { status, step: label };
+    })
+    .filter((step): step is PlanStep => step !== null);
+}
+
+function nowSeconds(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

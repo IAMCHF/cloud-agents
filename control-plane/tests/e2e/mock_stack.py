@@ -21,6 +21,7 @@ if str(BASE) not in sys.path:
 
 from app.bridge.hub import SessionHub  # noqa: E402 - 需要先注入仓库根到 sys.path
 from app.config import Settings  # noqa: E402
+from app.ledger import Database  # noqa: E402
 from app.main import create_app  # noqa: E402
 
 SESSION_ID = "e2e-session"
@@ -40,6 +41,9 @@ async def _main() -> int:
     )
     hub = SessionHub()
     hub.create(SESSION_ID, TOKEN, "e2e-user")
+    database = Database(settings.database_url)
+    await database.create_schema()
+    await database.dispose()
     app = create_app(settings=settings, hub=hub)
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="warning"))
     serve_task = asyncio.create_task(server.serve())

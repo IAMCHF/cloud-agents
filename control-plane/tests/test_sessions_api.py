@@ -45,9 +45,30 @@ def _client(tmp_path: Path, osb: FakeOpenSandbox) -> TestClient:
     return TestClient(create_app(settings=settings, components_factory=factory))
 
 
+def test_list_sessions_owner_scoped(tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    headers = HEADERS
+    with _client(tmp_path, osb) as client:
+        created = _create_session(client)
+        listed = client.get("/api/sessions", headers=headers)
+        assert listed.status_code == 200
+        rows = listed.json()
+        assert [row["session_id"] for row in rows] == [created["session_id"]]
+        assert rows[0]["status"] == "running"
+
+        assert (
+            client.delete(f"/api/sessions/{created['session_id']}", headers=headers).status_code
+            == 204
+        )
+        rows = client.get("/api/sessions", headers=headers).json()
+        assert rows[0]["status"] == "ended"
+        assert rows[0]["ended_at"] is not None
+
+
 def test_requires_owner_token(tmp_path: Path) -> None:
     with _client(tmp_path, FakeOpenSandbox()) as client:
         assert client.post("/api/sessions").status_code == 401
+        assert client.get("/api/sessions").status_code == 401
 
 
 def test_create_get_and_delete_session(tmp_path: Path) -> None:

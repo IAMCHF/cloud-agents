@@ -84,6 +84,8 @@ def main() -> int:
                     "platformOs": "linux",
                 },
             )
+        elif method == "thread/list":
+            respond(request_id, {"data": []})
         elif method in {"thread/start", "thread/resume"}:
             respond(request_id, {"thread": THREAD})
         elif method == "turn/start":
@@ -105,6 +107,25 @@ def main() -> int:
                     "turnId": TURN_ID,
                     "itemId": ITEM_ID,
                     "delta": "正在执行任务…",
+                },
+            )
+            notify(
+                "turn/diff/updated",
+                {
+                    "threadId": THREAD_ID,
+                    "turnId": TURN_ID,
+                    "diff": "--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old\n+hello",
+                },
+            )
+            notify(
+                "turn/plan/updated",
+                {
+                    "threadId": THREAD_ID,
+                    "turnId": TURN_ID,
+                    "plan": [
+                        {"status": "completed", "step": "定位问题"},
+                        {"status": "inProgress", "step": "执行命令"},
+                    ],
                 },
             )
             approval_pending = APPROVAL_ID

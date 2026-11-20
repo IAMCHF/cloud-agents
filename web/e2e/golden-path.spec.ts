@@ -11,6 +11,9 @@ test("金路径：派任务 → 流式回显 → 审批 → 完成", async ({ pa
 
   await expect(page.getByText("修复登录接口的空指针")).toBeVisible();
   await expect(page.getByText("正在执行任务…")).toBeVisible();
+  await expect(page.getByTestId("diff-view")).toBeVisible();
+  await expect(page.getByText(/\+hello/)).toBeVisible();
+  await expect(page.getByText("执行命令")).toBeVisible();
 
   const approval = page.getByText("/bin/echo hello");
   await expect(approval).toBeVisible();

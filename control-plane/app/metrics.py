@@ -7,6 +7,7 @@ from prometheus_client import (
     CollectorRegistry,
     Counter,
     Gauge,
+    Histogram,
     generate_latest,
 )
 
@@ -46,6 +47,24 @@ class Metrics:
             ["tenant"],
             registry=self.registry,
         )
+        self.idle_sessions_slept = Counter(
+            "cloud_agents_idle_sessions_slept_total",
+            "空闲会话销毁次数",
+            ["reason"],
+            registry=self.registry,
+        )
+        self.approval_timeouts = Counter(
+            "cloud_agents_approval_timeouts_total",
+            "无人响应审批自动拒绝次数",
+            registry=self.registry,
+        )
+        self.sandbox_create_seconds = Histogram(
+            "cloud_agents_sandbox_create_seconds",
+            "沙箱创建/恢复耗时（秒）",
+            ["mode"],
+            buckets=(1, 2, 3, 5, 8, 13, 21, 34),
+            registry=self.registry,
+        )
 
     def observe_active_sessions(self, count: int) -> None:
         self.active_sessions.set(count)
@@ -58,6 +77,16 @@ class Metrics:
 
     def observe_budget_rejection(self, tenant_id: str) -> None:
         self.llm_budget_rejections.labels(tenant=tenant_id).inc()
+
+    def observe_idle_slept(self, reason: str) -> None:
+        self.idle_sessions_slept.labels(reason=reason).inc()
+
+    def observe_approval_timeout(self, count: int = 1) -> None:
+        if count:
+            self.approval_timeouts.inc(count)
+
+    def observe_sandbox_create(self, mode: str, seconds: float) -> None:
+        self.sandbox_create_seconds.labels(mode=mode).observe(seconds)
 
     def render(self) -> bytes:
         return generate_latest(self.registry)

@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     audit_flush_interval_seconds: float = 0.2
     # 启动对账：只结束创建超过该时长的 creating 会话；running 保留供 WS 重连重建。
     creating_stale_timeout_seconds: float = 300.0
+    # 空闲销毁：无客户端且无进行中 turn 超过该时长 → 销毁沙箱、保留卷、转 idle。
+    idle_sweeper_enabled: bool = True
+    idle_timeout_seconds: float = 900.0
+    idle_sweep_interval_seconds: float = 60.0
+    # 无人响应审批：超过该时长自动 decline，避免 turn 永久挂起拖住沙箱。
+    approval_timeout_seconds: float = 300.0
 
     # 浏览器跨域访问管理面/网关时按需放开（逗号分隔；默认不放开）。
     cors_allow_origins: str = ""

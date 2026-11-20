@@ -119,7 +119,7 @@ async def sleep_session(
     if record.status == "ended":
         raise HTTPException(status_code=409, detail="会话已结束")
     try:
-        await manager.sleep_session(session_id)
+        await manager.sleep_session(session_id, force=True)
     except SessionStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OpenSandboxError as exc:

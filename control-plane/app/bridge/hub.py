@@ -7,6 +7,7 @@ import contextlib
 import hmac
 import json
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -91,6 +92,9 @@ class SessionChannel:
     bridge: WebSocket | None = None
     clients: dict[str, ClientLink] = field(default_factory=dict)
     pending: dict[str, str] = field(default_factory=dict)
+    pending_since: dict[str, float] = field(default_factory=dict)
+    active_turn: bool = False
+    last_activity: float = field(default_factory=time.monotonic)
 
 
 class SessionHub:
@@ -120,6 +124,60 @@ class SessionHub:
     def get(self, session_id: str) -> SessionChannel | None:
         return self._channels.get(session_id)
 
+    def channels(self) -> list[SessionChannel]:
+        return list(self._channels.values())
+
+    async def expire_pending(self, channel: SessionChannel, *, older_than: float) -> int:
+        """无人响应的审批超时自动 decline，避免 turn 永久挂起占住沙箱。"""
+        now = time.monotonic()
+        expired = [
+            request_id
+            for request_id, since in list(channel.pending_since.items())
+            if now - since >= older_than
+        ]
+        declined = 0
+        for request_id in expired:
+            frame = channel.pending.pop(request_id, None)
+            channel.pending_since.pop(request_id, None)
+            if frame is None:
+                continue
+            bridge = channel.bridge
+            if bridge is None:
+                continue
+            data = _load(frame)
+            original_id = data.get("id") if isinstance(data, dict) else request_id
+            try:
+                await bridge.send_text(
+                    json.dumps({"id": original_id, "result": {"decision": "decline"}})
+                )
+            except Exception:
+                channel.bridge = None
+                logger.warning("会话 %s 审批超时回写失败", channel.session_id)
+                continue
+            self._audit(
+                channel.session_id,
+                "approval.timeout",
+                {"request_id": request_id, "method": _method(frame)},
+            )
+            declined += 1
+        return declined
+
+    def idle_candidates(self, *, timeout: float, now: float | None = None) -> list[SessionChannel]:
+        """无客户端、无进行中 turn、无未决审批且静默超过阈值的通道。"""
+        current = time.monotonic() if now is None else now
+        return [
+            channel
+            for channel in self._channels.values()
+            if channel.bridge is not None
+            and not channel.clients
+            and not channel.active_turn
+            and not channel.pending
+            and current - channel.last_activity >= timeout
+        ]
+
+    def _touch(self, channel: SessionChannel) -> None:
+        channel.last_activity = time.monotonic()
+
     def authorize(self, session_id: str, token: str) -> SessionChannel | None:
         channel = self._channels.get(session_id)
         if channel is None or not token:
@@ -148,6 +206,7 @@ class SessionHub:
             await websocket.close(code=CLOSE_CONFLICT, reason="bridge already connected")
             return False
         channel.bridge = websocket
+        self._touch(channel)
         logger.info("会话 %s 桥接已连接", channel.session_id)
         return True
 
@@ -170,6 +229,7 @@ class SessionHub:
         link = ClientLink(connection_id=connection_id, websocket=websocket, actor=actor)
         link.writer = asyncio.create_task(link.run(), name=f"client-send-{connection_id[:8]}")
         channel.clients[connection_id] = link
+        self._touch(channel)
         logger.info(
             "会话 %s 客户端 %s 已连接（在线 %s）",
             channel.session_id,
@@ -191,6 +251,7 @@ class SessionHub:
         link = channel.clients.pop(connection_id, None)
         if link is None:
             return
+        self._touch(channel)
         self._audit(
             channel.session_id,
             "client.disconnected",
@@ -224,8 +285,17 @@ class SessionHub:
 
     async def from_bridge(self, channel: SessionChannel, frame: str) -> None:
         request_id = _server_request_id(frame)
+        method = _method(frame)
         if request_id is not None:
             channel.pending[request_id] = frame
+            # 只有审批类请求能安全地自动 decline；requestUserInput 等结果形状不同。
+            if method is not None and method.endswith("requestApproval"):
+                channel.pending_since[request_id] = time.monotonic()
+        if method == "turn/started":
+            channel.active_turn = True
+        elif method in {"turn/completed", "turn/failed", "turn/aborted"}:
+            channel.active_turn = False
+        self._touch(channel)
         for link in list(channel.clients.values()):
             if link.connection_id not in channel.clients:
                 continue
@@ -239,9 +309,11 @@ class SessionHub:
         link = channel.clients.get(connection_id)
         if link is None:
             return  # 慢客户端已被断开，剩余帧直接忽略
+        self._touch(channel)
         request_id = _client_response_id(frame)
         if request_id is not None:
             pending_frame = channel.pending.pop(request_id, None)
+            channel.pending_since.pop(request_id, None)
             if pending_frame is None:
                 self._audit(
                     channel.session_id,

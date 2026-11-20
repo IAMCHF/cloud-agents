@@ -8,6 +8,7 @@ import pytest
 from app.bridge.hub import SessionHub
 from app.config import Settings
 from app.ledger import AdmissionRejectedError, Ledger, SessionStateError
+from app.metrics import Metrics
 from app.sandbox import OpenSandboxClient, SandboxManager
 from tests.fakes.opensandbox import FakeOpenSandbox
 
@@ -33,6 +34,8 @@ def _manager(
     ledger: Ledger,
     osb: FakeOpenSandbox,
     hub: SessionHub,
+    *,
+    metrics: Metrics | None = None,
     **overrides: Any,
 ) -> SandboxManager:
     client = OpenSandboxClient(base_url="http://osb", timeout=5, transport=osb.transport())
@@ -42,6 +45,7 @@ def _manager(
         ledger=ledger,
         client=client,
         detach_settle_seconds=0,
+        metrics=metrics,
     )
 
 
@@ -82,6 +86,19 @@ async def test_create_session_injects_env_and_volume(ledger: Ledger, tmp_path: P
     assert record.sandbox_id == "sb-1"
     assert record.tenant_id == "default"
     assert hub.get(handle.session_id) is not None
+
+
+async def test_create_and_resume_observe_latency_metric(ledger: Ledger, tmp_path: Path) -> None:
+    osb = FakeOpenSandbox()
+    metrics = Metrics()
+    manager = _manager(tmp_path, ledger, osb, SessionHub(), metrics=metrics)
+    handle = await manager.create_session("alice", "default")
+    await manager.sleep_session(handle.session_id)
+    await manager.resume_session(handle.session_id)
+
+    rendered = metrics.render()
+    assert b'cloud_agents_sandbox_create_seconds_count{mode="create"} 1.0' in rendered
+    assert b'cloud_agents_sandbox_create_seconds_count{mode="resume"} 1.0' in rendered
 
 
 async def test_second_session_for_same_owner_is_rejected(ledger: Ledger, tmp_path: Path) -> None:

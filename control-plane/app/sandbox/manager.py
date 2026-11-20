@@ -2,7 +2,7 @@
 
 启动时序：准入 → 建沙箱（挂会话级卷 + 注入会话 token/控制面地址）→ 等 Running →
 沙箱内 entrypoint 起桥接，桥接再拉起 codex → 台账置 running。
-销毁：DELETE 沙箱 → 释放准入 → 台帐置 ended。P1 不做空闲销毁与预热池（P3）。
+销毁：DELETE 沙箱 → 释放准入 → 台帐置 ended；空闲销毁保留卷，会话可冷恢复。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import contextlib
 import ipaddress
 import logging
 import secrets
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -20,6 +21,7 @@ from urllib.parse import urlsplit
 from app.bridge.hub import CLOSE_SESSION_ENDED, CLOSE_SESSION_IDLE, SessionHub
 from app.config import Settings
 from app.ledger import Ledger, SessionStateError
+from app.metrics import Metrics
 from app.sandbox.client import (
     OpenSandboxClient,
     OpenSandboxError,
@@ -54,16 +56,19 @@ class SandboxManager:
         ledger: Ledger,
         client: OpenSandboxClient,
         detach_settle_seconds: float = 1.0,
+        metrics: Metrics | None = None,
     ) -> None:
         self._settings = settings
         self._hub = hub
         self._ledger = ledger
         self._client = client
         self._detach_settle_seconds = detach_settle_seconds
+        self._metrics = metrics
 
-    async def _launch(self, session_id: str, token: str) -> str:
+    async def _launch(self, session_id: str, token: str, *, mode: str = "create") -> str:
         """建沙箱并置 running；失败时回收已创建的沙箱，不留半成品。"""
         sandbox_id: str | None = None
+        started = time.monotonic()
         try:
             created = await self._client.create(self._spec(session_id, token))
             sandbox_id = created.id
@@ -76,6 +81,9 @@ class SandboxManager:
                 with contextlib.suppress(OpenSandboxError):
                     await self._client.delete(sandbox_id)
             raise
+        finally:
+            if self._metrics is not None:
+                self._metrics.observe_sandbox_create(mode, time.monotonic() - started)
         return sandbox_id
 
     async def create_session(self, owner: str, tenant_id: str) -> SessionHandle:
@@ -121,7 +129,9 @@ class SandboxManager:
         self._hub.remove(session_id)
         self._ledger.submit_event(session_id, "session.stopped", {"reason": reason})
 
-    async def sleep_session(self, session_id: str, *, reason: str = "idle") -> bool:
+    async def sleep_session(
+        self, session_id: str, *, reason: str = "idle", force: bool = False
+    ) -> bool:
         """空闲销毁：保留工作区与状态卷，只回收沙箱；会话转 idle 可冷恢复。"""
         record = await self._ledger.get(session_id)
         if record is None:
@@ -130,9 +140,15 @@ class SandboxManager:
             return False
         if record.status != "running" or record.sandbox_id is None:
             raise SessionStateError(f"会话状态 {record.status} 不可休眠")
+        channel = self._hub.get(session_id)
+        if channel is not None:
+            # 进行中的 turn/未决审批不打断；显式 sleep 可强制断开空闲客户端。
+            if channel.active_turn or channel.pending:
+                return False
+            if channel.clients and not force:
+                return False
         if not await self._ledger.mark_sleeping(session_id, reason):
             return False
-        channel = self._hub.get(session_id)
         if channel is not None:
             await self._hub.close_clients(channel, code=CLOSE_SESSION_IDLE, reason="session idle")
         try:
@@ -171,7 +187,7 @@ class SandboxManager:
         )
         self._hub.create(session_id, token, record.owner)
         try:
-            sandbox_id = await self._launch(session_id, token)
+            sandbox_id = await self._launch(session_id, token, mode="resume")
         except BaseException:
             self._hub.remove(session_id)
             await self._ledger.mark_idle(session_id, "resume_failed")
@@ -219,14 +235,24 @@ class SandboxManager:
                 recovered += 1
         return recovered
 
+    async def _close_channel_clients(self, session_id: str, *, code: int, reason: str) -> None:
+        channel = self._hub.get(session_id)
+        if channel is not None:
+            await self._hub.close_clients(channel, code=code, reason=reason)
+        self._hub.remove(session_id)
+
     async def on_bridge_detached(self, session_id: str) -> None:
         """桥接断开 → 查沙箱状态：仍 Running 视为网络抖动，已退出则转 idle 供冷恢复。"""
         record = await self._ledger.get(session_id)
-        if (
-            record is None
-            or record.status in {"ended", "idle", "sleeping"}
-            or record.sandbox_id is None
-        ):
+        if record is None:
+            return
+        if record.status in {"ended", "idle", "sleeping"}:
+            code = CLOSE_SESSION_ENDED if record.status == "ended" else CLOSE_SESSION_IDLE
+            await self._close_channel_clients(
+                session_id, code=code, reason=f"session {record.status}"
+            )
+            return
+        if record.sandbox_id is None:
             return
         await asyncio.sleep(self._detach_settle_seconds)  # 等沙箱状态收敛
         try:
@@ -240,7 +266,9 @@ class SandboxManager:
         if info is not None and info.running:
             return
         if await self._ledger.mark_idle(session_id, "sandbox_exited"):
-            self._hub.remove(session_id)
+            await self._close_channel_clients(
+                session_id, code=CLOSE_SESSION_IDLE, reason="sandbox exited"
+            )
             self._ledger.submit_event(
                 session_id,
                 "session.exited",

@@ -10,7 +10,7 @@ from app.config import Settings
 from app.ledger import Database, Ledger
 from app.llm_gateway import LlmGateway
 from app.metrics import Metrics
-from app.sandbox import OpenSandboxClient, SandboxManager
+from app.sandbox import IdleSweeper, OpenSandboxClient, SandboxManager
 from tests.fakes.opensandbox import FakeOpenSandbox
 
 
@@ -30,14 +30,16 @@ async def build_test_components(
         base_url=settings.opensandbox_base_url,
         transport=sandbox.transport(),
     )
+    metrics = Metrics()
     manager = SandboxManager(
         settings=settings,
         hub=hub,
         ledger=ledger,
         client=client,
         detach_settle_seconds=0,
+        metrics=metrics,
     )
-    metrics = Metrics()
+    sweeper = IdleSweeper(hub=hub, manager=manager, settings=settings, metrics=metrics)
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,
         api_key=settings.llm_api_key,
@@ -54,4 +56,5 @@ async def build_test_components(
         manager=manager,
         gateway=gateway,
         metrics=metrics,
+        sweeper=sweeper,
     )

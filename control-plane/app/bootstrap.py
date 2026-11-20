@@ -11,7 +11,7 @@ from app.config import Settings
 from app.ledger import Database, Ledger
 from app.llm_gateway import LlmGateway
 from app.metrics import Metrics
-from app.sandbox import OpenSandboxClient, SandboxManager
+from app.sandbox import IdleSweeper, OpenSandboxClient, SandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,12 @@ class Components:
     manager: SandboxManager
     gateway: LlmGateway
     metrics: Metrics
+    sweeper: IdleSweeper
 
     async def aclose(self) -> None:
         self.hub.on_bridge_detached = None
         self.hub.on_audit = None
+        await self.sweeper.stop()
         await self.gateway.aclose()
         await self.client.aclose()
         await self.ledger.stop()
@@ -49,7 +51,10 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
         base_url=settings.opensandbox_base_url,
         api_key=settings.opensandbox_api_key,
     )
-    manager = SandboxManager(settings=settings, hub=hub, ledger=ledger, client=client)
+    metrics = Metrics()
+    manager = SandboxManager(
+        settings=settings, hub=hub, ledger=ledger, client=client, metrics=metrics
+    )
     hub.on_bridge_detached = manager.on_bridge_detached
     # 多客户端连接事件与审批响应归因落审计（批量异步写）。
     hub.on_audit = ledger.submit_event
@@ -57,7 +62,6 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     reconciled = await manager.reconcile_running()
     if reconciled:
         logger.warning("启动对账：%s 个会话已转为 idle（沙箱不存在）", reconciled)
-    metrics = Metrics()
     gateway = LlmGateway(
         upstream_base_url=settings.llm_upstream_base_url,
         api_key=settings.llm_api_key,
@@ -65,6 +69,8 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
         timeout=settings.llm_timeout_seconds,
         metrics=metrics,
     )
+    sweeper = IdleSweeper(hub=hub, manager=manager, settings=settings, metrics=metrics)
+    await sweeper.start()
     return Components(
         settings=settings,
         hub=hub,
@@ -74,4 +80,5 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
         manager=manager,
         gateway=gateway,
         metrics=metrics,
+        sweeper=sweeper,
     )

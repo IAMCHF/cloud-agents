@@ -7,9 +7,11 @@ from app.sandbox.client import (
     SandboxNotFoundError,
     SandboxSpec,
 )
+from app.sandbox.idle import IdleSweeper
 from app.sandbox.manager import SandboxManager, SessionHandle
 
 __all__ = [
+    "IdleSweeper",
     "OpenSandboxClient",
     "OpenSandboxError",
     "SandboxInfo",

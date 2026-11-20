@@ -39,7 +39,7 @@ Web 前端（同一协议的渲染层，WSS）──────────┘ 
 | Agent 引擎 | codex app-server（原版二进制，版本固定） | Apache-2.0 | 2026-08 官方定位为平台层，协议文档化；thread/turn/item、审批回调、resume/fork、自定义 model_providers 均已核实（[app-server README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)） |
 | 沙箱基础设施 | OpenSandbox（Docker 运行时起步，K8s 演进） | Apache-2.0 | 阿里内部生产日均百万级沙箱；2026-10 被 AAIF 收录（[报道](https://m.toutiao.com/article/7700873824409092623/)）；暂停/恢复、egress 白名单、Ingress 预览、execd 终端/文件 API 原生自带；**Docker 模式无 KVM 依赖** |
 | 控制面 | 自建（Python + FastAPI）：Web 服务 + WSS/SSE 网关 + 会话调度器 + LLM 网关 + Postgres | — | 认证(OIDC)/租户/RBAC/配额/审计；网关薄代理 JSON-RPC，不发明新协议 |
-| Web 前端 | React SPA（TypeScript），消费 `codex app-server generate-json-schema` → json-schema-to-typescript 生成的类型绑定（与客户端同流程） | — | 对话流/diff/审批/任务列表；终端(xterm.js+execd)、文件树、应用预览分期上；P3 T4 已落地会话列表、线程恢复、计划与 CodeMirror 6 diff；P3 T5 已落地终端与文件树（execd 直连，会话 token 鉴权） |
+| Web 前端 | React SPA（TypeScript），消费 `codex app-server generate-json-schema` → json-schema-to-typescript 生成的类型绑定（与客户端同流程） | — | 对话流/diff/审批/任务列表；终端(xterm.js+execd)、文件树、应用预览分期上；P3 T4 已落地会话列表、线程恢复、计划与 CodeMirror 6 diff；P3 T5 已落地终端与文件树（execd 直连，会话 token 鉴权）；P3 T6 已落地子域应用预览（短期票据 + HTTP/WS 反代） |
 | 模型 | 内网现有模型服务，经 LLM 网关按租户计量转发 | — | 沙箱内 codex 的 model_providers 指向网关；真 key 只在网关。**codex 0.167 起只支持 Responses API**（chat wire_api 已移除，2026-11-18 实测）；内网模型 Responses 兼容（用户确认 2026-11-18），日后若引入 chat-only 第三方上游才需网关转换层（见 §7） |
 
 明确不选：Daytona（2026-06 闭源归档）、LobeChat 云沙箱（不开源）、Open WebUI 去品牌部署（许可越线）、仿冒 Codex Cloud 私有后端（闭源协议，随时失效）、E2B（自托管栈重且 Firecracker 需 KVM/裸金属；若日后有裸金属+强运维可重评）。

@@ -34,6 +34,11 @@
   用会话 token（按台账反查，多副本可服务）。终端直连 `GET /v1/sandboxes/<id>/endpoints/44772`
   返回的 Pod IP（OpenSandbox HTTP 代理不支持 WS 升级），控制面与沙箱需同集群互通；
   `EXECD_ACCESS_TOKEN` 仅在沙箱 execd 启用鉴权时配置。
+- **P3 T6 应用预览**：`POST /api/sessions/<id>/preview?token=` 生成 HMAC 短期票据，浏览器访问
+  `<session>--<port>.preview.<PREVIEW_BASE_DOMAIN>`；控制面按 Host 反代到沙箱 endpoint（HTTP + WS）。
+  kind 用 `PREVIEW_BASE_DOMAIN=127.0.0.1.nip.io` + catch-all Ingress；生产需通配 DNS
+  `*.preview.<域>` 与对应 Ingress/TLS。`PREVIEW_TOKEN_SECRET` 留空回落到 `P1_AUTH_TOKEN`，
+  生产建议单独配置。
 
 ## 1. 构建并加载镜像
 

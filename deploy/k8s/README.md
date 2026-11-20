@@ -22,6 +22,10 @@
   （`CODEX_HOME`）。`POST /api/sessions/<id>/sleep` 销毁沙箱、两卷保留、台账转 `idle`；
   `POST /api/sessions/<id>/resume` 重新准入、轮换 token、新沙箱挂原卷，客户端仍用原生
   `thread/resume` 回放历史。启动对账把沙箱不存在的 `running` 转 `idle`，可恢复。
+- **P3 T2 空闲销毁**：无客户端、无进行中 turn、静默超过 `IDLE_TIMEOUT_SECONDS`（默认 900s）
+  的会话由 sweeper 转 idle；`*requestApproval` 超过 `APPROVAL_TIMEOUT_SECONDS`（默认 300s）
+  自动 decline。sweeper 只处理本副本持有桥接的通道。预热池不采用（`poolRef` 拒绝卷与
+  networkPolicy），用镜像预拉 + `cloud_agents_sandbox_create_seconds` 观测创建时延。
 
 ## 1. 构建并加载镜像
 

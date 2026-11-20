@@ -30,6 +30,10 @@
   `ARCHIVE_DRY_RUN=true` 默认只出计划。`GET /api/archive/plan`、`POST /api/archive/run`
   （显式 `dry_run=false` 才落包）、`POST /api/archive/{id}/restore?force=true`。
   PVC 后端会起短生命周期归档沙箱，经 OpenSandbox 端口代理下载/上传 tar；不自动删除源 PVC。
+- **P3 T5 终端/文件树**：`WS /api/sessions/<id>/terminal?token=` 与 `GET /api/sessions/<id>/files|file`
+  用会话 token（按台账反查，多副本可服务）。终端直连 `GET /v1/sandboxes/<id>/endpoints/44772`
+  返回的 Pod IP（OpenSandbox HTTP 代理不支持 WS 升级），控制面与沙箱需同集群互通；
+  `EXECD_ACCESS_TOKEN` 仅在沙箱 execd 启用鉴权时配置。
 
 ## 1. 构建并加载镜像
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 
+from app.archive import ArchiveService
 from app.bootstrap import Components
 from app.bridge.hub import SessionHub
 from app.config import Settings
@@ -31,6 +32,7 @@ async def build_test_components(
         transport=sandbox.transport(),
     )
     metrics = Metrics()
+    archive = ArchiveService(settings=settings, ledger=ledger, client=client)
     manager = SandboxManager(
         settings=settings,
         hub=hub,
@@ -57,4 +59,5 @@ async def build_test_components(
         gateway=gateway,
         metrics=metrics,
         sweeper=sweeper,
+        archive=archive,
     )

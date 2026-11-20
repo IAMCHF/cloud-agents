@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     # 无人响应审批：超过该时长自动 decline，避免 turn 永久挂起拖住沙箱。
     approval_timeout_seconds: float = 300.0
 
+    # 卷归档：仅归档已结束会话；默认 dry-run，不删除源卷。
+    archive_enabled: bool = False
+    archive_root: str = ""
+    archive_retention_days: int = 30
+    archive_dry_run: bool = True
+    archive_timeout_seconds: float = 600.0
+    archive_cpu: str = "1"
+    archive_memory: str = "1Gi"
+
     # 浏览器跨域访问管理面/网关时按需放开（逗号分隔；默认不放开）。
     cors_allow_origins: str = ""
 
@@ -116,6 +125,8 @@ class Settings(BaseSettings):
             raise ValueError("sandbox_runtime=kubernetes 时必须 volume_backend=pvc")
         if self.auth_mode == "oidc" and not (self.oidc_issuer and self.oidc_client_id):
             raise ValueError("auth_mode=oidc 时必须配置 oidc_issuer 与 oidc_client_id")
+        if self.archive_enabled and not self.archive_root:
+            raise ValueError("archive_enabled=true 时必须配置 archive_root")
         return self
 
 

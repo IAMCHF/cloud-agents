@@ -66,6 +66,9 @@ class SessionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 卷归档：archived_at 非空表示已归档；archive_path 为归档目录/对象前缀。
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archive_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
 class AuditEventRow(Base):

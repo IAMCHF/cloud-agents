@@ -31,10 +31,29 @@ def test_upgrade_creates_ledger_tables(tmp_path: Path, monkeypatch: pytest.Monke
         session_columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
     assert {"sessions", "audit_events", "tenants", "users", "llm_usage"} <= tables
     assert "tenant_id" in session_columns
+    assert {"archived_at", "archive_path"} <= session_columns
     assert "ix_sessions_owner" in indexes
     assert "ix_sessions_tenant_id" in indexes
     assert "ix_audit_events_session_id" in indexes
     assert "ix_llm_usage_tenant_id" in indexes
+
+
+def test_downgrade_0003_removes_archive_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    database_path = tmp_path / "archive_downgrade.db"
+    config = Config(str(BASE / "alembic.ini"))
+    config.set_main_option("script_location", str(BASE / "migrations"))
+    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database_path}")
+
+    command.upgrade(config, "head")
+    command.downgrade(config, "0002_tenants_usage")
+
+    with sqlite3.connect(database_path) as connection:
+        session_columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
+    assert "tenant_id" in session_columns
+    assert not {"archived_at", "archive_path"} & session_columns
 
 
 def test_downgrade_removes_p2_tables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

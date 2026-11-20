@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -105,6 +106,44 @@ class OpenSandboxClient:
     async def resume(self, sandbox_id: str) -> None:
         response = await self._client.post(f"/v1/sandboxes/{sandbox_id}/resume")
         _expect(response, {200, 202})
+
+    async def proxy_download(self, sandbox_id: str, port: int, path: str, target: Path) -> int:
+        """通过 OpenSandbox 端口代理下载沙箱内文件（归档用）。"""
+        url = f"/v1/sandboxes/{sandbox_id}/proxy/{port}/{path.lstrip('/')}"
+        async with self._client.stream("GET", url, timeout=None) as response:
+            if response.status_code != 200:
+                body = await response.aread()
+                raise OpenSandboxError(f"代理下载失败 HTTP {response.status_code}: {body[:200]!r}")
+            total = 0
+            with target.open("wb") as handle:
+                async for chunk in response.aiter_bytes():
+                    handle.write(chunk)
+                    total += len(chunk)
+            return total
+
+    async def proxy_upload(self, sandbox_id: str, port: int, path: str, source: Path) -> None:
+        """通过 OpenSandbox 端口代理上传文件（恢复用）。"""
+        url = f"/v1/sandboxes/{sandbox_id}/proxy/{port}/{path.lstrip('/')}"
+
+        async def body() -> Any:
+            with source.open("rb") as handle:
+                while chunk := handle.read(1 << 20):
+                    yield chunk
+
+        response = await self._client.put(url, content=body(), timeout=None)
+        if response.status_code not in {200, 201, 204}:
+            raise OpenSandboxError(
+                f"代理上传失败 HTTP {response.status_code}: {response.text[:200]}"
+            )
+
+    async def proxy_get_text(self, sandbox_id: str, port: int, path: str) -> str:
+        url = f"/v1/sandboxes/{sandbox_id}/proxy/{port}/{path.lstrip('/')}"
+        response = await self._client.get(url, timeout=None)
+        if response.status_code != 200:
+            raise OpenSandboxError(
+                f"代理请求失败 HTTP {response.status_code}: {response.text[:200]}"
+            )
+        return response.text
 
     async def wait_until_running(
         self,

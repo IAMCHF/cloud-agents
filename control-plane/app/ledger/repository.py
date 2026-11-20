@@ -58,6 +58,8 @@ class SessionRecord:
     created_at: datetime
     ended_at: datetime | None
     end_reason: str | None
+    archived_at: datetime | None = None
+    archive_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -394,6 +396,39 @@ class Ledger:
             result = await session.execute(select(SessionRow).where(SessionRow.status == status))
             return [_session_record(row) for row in result.scalars().all()]
 
+    async def list_archive_candidates(
+        self,
+        *,
+        older_than: datetime,
+        owner: str | None = None,
+        limit: int = 50,
+    ) -> list[SessionRecord]:
+        conditions: list[ColumnElement[bool]] = [
+            SessionRow.status == "ended",
+            SessionRow.ended_at.is_not(None),
+            SessionRow.ended_at < older_than,
+            SessionRow.archived_at.is_(None),
+        ]
+        if owner is not None:
+            conditions.append(SessionRow.owner == owner)
+        async with self._database.session() as session:
+            result = await session.execute(
+                select(SessionRow).where(*conditions).order_by(SessionRow.ended_at).limit(limit)
+            )
+            return [_session_record(row) for row in result.scalars().all()]
+
+    async def mark_archived(self, session_id: str, archive_path: str) -> bool:
+        async with self._database.session() as session, session.begin():
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(SessionRow)
+                    .where(SessionRow.id == session_id, SessionRow.archived_at.is_(None))
+                    .values(archived_at=datetime.now(UTC), archive_path=archive_path)
+                ),
+            )
+            return (result.rowcount or 0) > 0
+
     async def mark_ended(self, session_id: str, reason: str) -> None:
         async with self._database.session() as session, session.begin():
             row = await session.get(SessionRow, session_id)
@@ -503,6 +538,8 @@ def _session_record(row: SessionRow) -> SessionRecord:
         created_at=row.created_at,
         ended_at=row.ended_at,
         end_reason=row.end_reason,
+        archived_at=row.archived_at,
+        archive_path=row.archive_path,
     )
 
 

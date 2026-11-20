@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from app.archive import ArchiveService
 from app.bridge.hub import SessionHub
 from app.config import Settings
 from app.ledger import Database, Ledger
@@ -27,6 +28,7 @@ class Components:
     gateway: LlmGateway
     metrics: Metrics
     sweeper: IdleSweeper
+    archive: ArchiveService
 
     async def aclose(self) -> None:
         self.hub.on_bridge_detached = None
@@ -71,6 +73,7 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     )
     sweeper = IdleSweeper(hub=hub, manager=manager, settings=settings, metrics=metrics)
     await sweeper.start()
+    archive = ArchiveService(settings=settings, ledger=ledger, client=client)
     return Components(
         settings=settings,
         hub=hub,
@@ -81,4 +84,5 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
         gateway=gateway,
         metrics=metrics,
         sweeper=sweeper,
+        archive=archive,
     )

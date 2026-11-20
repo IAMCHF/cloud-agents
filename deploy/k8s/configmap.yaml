@@ -15,6 +15,12 @@ data:
   WORKSPACE_PVC_SIZE: 1Gi
   # codex 状态盘（CODEX_HOME）独立 PVC，休眠/销毁沙箱后保留供冷恢复。
   STATE_PVC_SIZE: 1Gi
+  # 卷归档：仅已结束会话；默认 dry-run（TRUE 时只出计划不落包）。
+  ARCHIVE_ENABLED: "true"
+  ARCHIVE_ROOT: /archive
+  ARCHIVE_RETENTION_DAYS: "30"
+  ARCHIVE_DRY_RUN: "true"
+  ARCHIVE_TIMEOUT_SECONDS: "600"
   SANDBOX_NETWORK_DEFAULT_ACTION: deny
   SANDBOX_EGRESS_ALLOW: ""
   SANDBOX_CPU: "1"

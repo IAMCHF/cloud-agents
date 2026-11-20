@@ -7,9 +7,11 @@ from typing import Annotated, NoReturn
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from app.api.common import ledger_from_request as _ledger
+from app.api.common import owned_session as _owned_session
 from app.auth import Principal, require_principal
 from app.config import Settings
-from app.ledger import AdmissionRejectedError, Ledger, SessionRecord, SessionStateError
+from app.ledger import AdmissionRejectedError, SessionStateError
 from app.metrics import Metrics
 from app.sandbox import OpenSandboxError, SandboxManager, SessionHandle
 
@@ -47,22 +49,6 @@ def _manager(request: Request) -> SandboxManager:
 def _metrics(request: Request) -> Metrics | None:
     metrics = getattr(request.app.state, "metrics", None)
     return metrics if isinstance(metrics, Metrics) else None
-
-
-def _ledger(request: Request) -> Ledger:
-    ledger = getattr(request.app.state, "ledger", None)
-    if not isinstance(ledger, Ledger):
-        raise HTTPException(status_code=503, detail="ledger not configured")
-    return ledger
-
-
-async def _owned_session(ledger: Ledger, session_id: str, principal: Principal) -> SessionRecord:
-    record = await ledger.get(session_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="session not found")
-    if record.owner != principal.subject:
-        raise HTTPException(status_code=403, detail="session belongs to another user")
-    return record
 
 
 def _reject_admission(request: Request, exc: AdmissionRejectedError) -> NoReturn:

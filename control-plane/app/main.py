@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
+from app.api.archive import router as archive_router
 from app.api.auth import router as auth_router
 from app.api.sessions import router as sessions_router
 from app.auth import OidcProvider
@@ -54,6 +55,7 @@ def create_app(
         app.state.manager = components.manager
         app.state.llm_gateway = components.gateway
         app.state.metrics = components.metrics
+        app.state.archive = components.archive
         try:
             yield
         finally:
@@ -78,6 +80,7 @@ def create_app(
     app.include_router(bridge_router)
     app.include_router(auth_router)
     app.include_router(sessions_router)
+    app.include_router(archive_router)
     app.include_router(build_llm_router())
 
     @app.get("/healthz")

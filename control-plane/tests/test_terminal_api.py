@@ -179,7 +179,15 @@ def test_terminal_relays_text_bytes_and_drops_control_frames(
             exec_ws.push('{"type":"status"}')
             assert ws.receive_text() == '{"type":"status"}'
 
-        _wait_for(lambda: bool(execd.requests) and execd.requests[-1].method == "DELETE")
+            # TestClient 退出时会立即 cancel 应用任务；先让服务端完成 PTY 清理。
+            ws.close()
+            _wait_for(
+                lambda: any(
+                    request.method == "DELETE" and request.url.path == "/pty/pty-1"
+                    for request in execd.requests
+                )
+            )
+            time.sleep(0.2)
 
     assert connect_urls == ["ws://execd.test:44772/pty/pty-1/ws"]
     assert execd.requests[-1].url.path == "/pty/pty-1"

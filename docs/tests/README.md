@@ -16,6 +16,7 @@
 | [2026-11-18 P0 K8s/NFS/OIDC 可行性](2026-11-18-P0-K8s与NFS可行性.md) | 一次性记录 | kind 上 OpenSandbox 生命周期与 egress、pause 快照缺口、NFSv4 SQLite 锁、Keycloak OIDC、资源占用 |
 | [2026-11-18 P1.5 K8s 运行时验证](2026-11-18-P1.5-K8s运行时验证.md) | 一次性记录 | 运行时/PVC 抽象落地；kind 上控制面+Postgres+桥接+真实 turn 全链路；PVC 保留语义 |
 | [2026-11-18 P2 控制面验证](2026-11-18-P2-控制面验证.md) | 一次性记录 | P2：真实 Keycloak token、配额、LLM 计量、双客户端扇出、双副本杀 Pod resume、哈希漂移自愈 |
+| [2026-11-20 P3 冷恢复验证](2026-11-20-P3-冷恢复验证.md) | 一次性记录 | P3 T1：状态卷、休眠销毁、新沙箱冷恢复、thread/resume 历史回放与续聊、token 轮换 |
 
 可执行用例不在本目录，代码位置：
 

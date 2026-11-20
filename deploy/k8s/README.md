@@ -18,13 +18,17 @@
   `proxy-next-upstream: "error timeout http_403"` 换副本重试，直到命中持有桥接的副本。
 - 启动对账只结束创建超过 `CREATING_STALE_TIMEOUT_SECONDS` 的 `creating` 会话；`running`
   保留，等桥接/客户端重连重建通道。REST 管理面与 LLM 网关无状态，任意副本可服务。
+- **P3 T1 冷恢复**：每会话两个 PVC——`ws-<session>`（工作区）与 `state-<session>`
+  （`CODEX_HOME`）。`POST /api/sessions/<id>/sleep` 销毁沙箱、两卷保留、台账转 `idle`；
+  `POST /api/sessions/<id>/resume` 重新准入、轮换 token、新沙箱挂原卷，客户端仍用原生
+  `thread/resume` 回放历史。启动对账把沙箱不存在的 `running` 转 `idle`，可恢复。
 
 ## 1. 构建并加载镜像
 
 ```powershell
-docker build --provenance=false --sbom=false -f control-plane/Dockerfile -t cloud-agents/control-plane:p15 .
+docker build --provenance=false --sbom=false -f control-plane/Dockerfile -t cloud-agents/control-plane:p3 .
 docker pull postgres:17
-kind load docker-image cloud-agents/control-plane:p15 --name cloud-agents-dev
+kind load docker-image cloud-agents/control-plane:p3 --name cloud-agents-dev
 kind load docker-image cloud-agents/sandbox:0.1.0 --name cloud-agents-dev
 ```
 
@@ -108,11 +112,30 @@ curl.exe -s -X POST http://cloud-agents.<NODE_IP>.nip.io/api/sessions `
 拿返回的 `session_id` / `token` 直接使用 `ws_url`（已指向 Ingress）走原生 WS
 （可用 `docs/tests/本地测试指南.md` 的客户端）。验收点：
 
-- `kubectl -n opensandbox get pvc` 出现 `ws-<session_id>` 且 Bound；
+- `kubectl -n opensandbox get pvc` 出现 `ws-<session_id>` 与 `state-<session_id>` 且 Bound；
 - 真实 turn 写 `/workspace/hello.txt` 后，`kubectl -n opensandbox exec <pod> -c sandbox -- cat /workspace/hello.txt` 可见；
 - `DELETE /api/sessions/<id>` 后 Pod 回收、Postgres 台账 `ended`；
-- PVC 默认保留（`deleteOnSandboxTermination=false`），P3 归档前需手动清理：
-  `kubectl -n opensandbox delete pvc ws-<session_id>`。
+- PVC 默认保留（`deleteOnSandboxTermination=false`），P3 T3 归档前需手动清理：
+  `kubectl -n opensandbox delete pvc ws-<session_id> state-<session_id>`。
+
+### 4.0 冷恢复冒烟
+
+```powershell
+# 休眠：销毁沙箱，保留两卷
+curl.exe -s -X POST http://cloud-agents.<NODE_IP>.nip.io/api/sessions/<id>/sleep `
+  -H "Authorization: Bearer <P1_AUTH_TOKEN>" -o NUL -w "%{http_code}`n"   # 204
+
+# 状态应为 idle，sandbox_id 为 null
+curl.exe -s http://cloud-agents.<NODE_IP>.nip.io/api/sessions/<id> `
+  -H "Authorization: Bearer <P1_AUTH_TOKEN>"
+
+# 恢复：返回新 token；用新 ws_url 连上后发原生 thread/resume
+curl.exe -s -X POST http://cloud-agents.<NODE_IP>.nip.io/api/sessions/<id>/resume `
+  -H "Authorization: Bearer <P1_AUTH_TOKEN>"
+```
+
+验收点：休眠后沙箱 Pod 消失、两 PVC Bound；恢复后新沙箱 `/home/agent/.codex` 可见
+`config.toml`/`state_5.sqlite`/`sessions/`；`thread/resume` 返回休眠前的历史轮次并可续聊。
 
 ### 4.1 P2 HA 验证（双副本 + 粘性 + 重建）
 
@@ -128,8 +151,11 @@ curl.exe -s -X POST http://cloud-agents.<NODE_IP>.nip.io/api/sessions `
 
 - **pause/resume**：K8s 默认无 snapshot registry，pause 会 `PauseFailed`；P1.5 只走冷恢复设计，不用 pause。
 - 多副本依赖 Ingress 粘性（`$arg_token`）；裸连 Service 时桥接与客户端可能落在不同副本，
-  表现为握手被 403 拒绝或连上后收不到流式事件。副本增减导致的哈希漂移由
-  `proxy-next-upstream` 重试自愈；桥接完全未连接时客户端需退避重试。
+  表现为握手被拒绝或连上后收不到流式事件。副本增减导致的哈希漂移由
+  `proxy-next-upstream` 重试自愈；但滚动更新时旧 Pod 仍在 endpoints 内，客户端可能收到
+  连接重置（而非稳定 403），客户端需 1s 退避重试（Web 自动重试列 P3 T7）。
+- `state-<session>` 与 `ws-<session>` 两个 PVC 都由 OpenSandbox 创建；kind local-path 权限正常。
+  真实 NFS 上非 root（uid 1000）写 `CODEX_HOME` 需要 `fsGroup` 或目录属主策略，D2 复核。
 - 本清单不包含 TLS、NetworkPolicy 基线、Secret 轮换与 PodSecurity；P4 补。
 - `postgres-password` 直接拼进 `DATABASE_URL`，生产口令如含 URL 特殊字符需先编码或改用完整
   `database-url` Secret 键。

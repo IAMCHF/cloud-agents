@@ -26,6 +26,10 @@
   的会话由 sweeper 转 idle；`*requestApproval` 超过 `APPROVAL_TIMEOUT_SECONDS`（默认 300s）
   自动 decline。sweeper 只处理本副本持有桥接的通道。预热池不采用（`poolRef` 拒绝卷与
   networkPolicy），用镜像预拉 + `cloud_agents_sandbox_create_seconds` 观测创建时延。
+- **P3 T3 卷归档**：`archive` PVC 挂到控制面 `/archive`；`ARCHIVE_ENABLED=true`、
+  `ARCHIVE_DRY_RUN=true` 默认只出计划。`GET /api/archive/plan`、`POST /api/archive/run`
+  （显式 `dry_run=false` 才落包）、`POST /api/archive/{id}/restore?force=true`。
+  PVC 后端会起短生命周期归档沙箱，经 OpenSandbox 端口代理下载/上传 tar；不自动删除源 PVC。
 
 ## 1. 构建并加载镜像
 
@@ -160,6 +164,8 @@ curl.exe -s -X POST http://cloud-agents.<NODE_IP>.nip.io/api/sessions/<id>/resum
   连接重置（而非稳定 403），客户端需 1s 退避重试（Web 自动重试列 P3 T7）。
 - `state-<session>` 与 `ws-<session>` 两个 PVC 都由 OpenSandbox 创建；kind local-path 权限正常。
   真实 NFS 上非 root（uid 1000）写 `CODEX_HOME` 需要 `fsGroup` 或目录属主策略，D2 复核。
+- 归档 `/archive` 是控制面独立 PVC（开发机 2Gi）；归档/恢复会临时起一个沙箱，批量归档需限流；
+  不自动删除源 PVC，对象存储未接，定时归档由外部 Cron 调 API。
 - 本清单不包含 TLS、NetworkPolicy 基线、Secret 轮换与 PodSecurity；P4 补。
 - `postgres-password` 直接拼进 `DATABASE_URL`，生产口令如含 URL 特殊字符需先编码或改用完整
   `database-url` Secret 键。

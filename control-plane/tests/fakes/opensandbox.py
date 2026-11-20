@@ -9,9 +9,16 @@ import httpx
 
 
 class FakeOpenSandbox:
-    def __init__(self, *, state: str = "Running", sandbox_id: str = "sb-1") -> None:
+    def __init__(
+        self,
+        *,
+        state: str = "Running",
+        sandbox_id: str = "sb-1",
+        endpoint: str = "execd.test:44772",
+    ) -> None:
         self.state = state
         self.sandbox_id = sandbox_id
+        self.endpoint = endpoint
         self.created: list[dict[str, Any]] = []
         self.deleted: list[str] = []
         self.resumed: list[str] = []
@@ -39,4 +46,6 @@ class FakeOpenSandbox:
             self.resumed.append(self.sandbox_id)
             self.state = "Running"
             return httpx.Response(202)
+        if request.method == "GET" and path == f"/v1/sandboxes/{self.sandbox_id}/endpoints/44772":
+            return httpx.Response(200, json={"endpoint": self.endpoint})
         return httpx.Response(404, json={"error": "not found"})

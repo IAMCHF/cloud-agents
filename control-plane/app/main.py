@@ -12,6 +12,7 @@ from app import __version__
 from app.api.archive import router as archive_router
 from app.api.auth import router as auth_router
 from app.api.sessions import router as sessions_router
+from app.api.terminal import router as terminal_router
 from app.auth import OidcProvider
 from app.bootstrap import Components, build_components
 from app.bridge.hub import SessionHub
@@ -80,6 +81,7 @@ def create_app(
     app.include_router(bridge_router)
     app.include_router(auth_router)
     app.include_router(sessions_router)
+    app.include_router(terminal_router)
     app.include_router(archive_router)
     app.include_router(build_llm_router())
 

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodexRpcClient } from "../../rpc/client";
 import { createSessionStore } from "../../state/session";
 import { FakeTransport } from "../../test/fakeTransport";
@@ -116,5 +116,44 @@ describe("ChatView states", () => {
 
     expect(screen.getByText("选择目标分支")).toBeInTheDocument();
     expect(screen.getByText("需要确认")).toBeInTheDocument();
+  });
+});
+
+describe("ChatView side panels", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("explains that terminal and files need a connected session", async () => {
+    const { store } = setup();
+
+    render(<ChatView store={store} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "终端" }));
+    expect(screen.getByText("会话未连接，终端不可用。")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "文件" }));
+    expect(screen.getByText("会话未连接，文件树不可用。")).toBeInTheDocument();
+  });
+
+  it("mounts the file panel when session credentials are available", async () => {
+    const { store } = setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ entries: [] }), { status: 200 })),
+    );
+
+    render(
+      <ChatView
+        store={store}
+        sessionId="s1"
+        token="t1"
+        wsOrigin="ws://cp:8000"
+        httpOrigin="http://cp:8000"
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "文件" }));
+    expect(await screen.findByText("空目录")).toBeInTheDocument();
   });
 });

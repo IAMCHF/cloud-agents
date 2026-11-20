@@ -21,6 +21,7 @@ async def build_test_components(
     *,
     osb: FakeOpenSandbox | None = None,
     llm_transport: httpx.AsyncBaseTransport | None = None,
+    execd_transport: httpx.AsyncBaseTransport | None = None,
 ) -> Components:
     database = Database(settings.database_url)
     await database.create_schema()
@@ -29,7 +30,9 @@ async def build_test_components(
     sandbox = osb if osb is not None else FakeOpenSandbox()
     client = OpenSandboxClient(
         base_url=settings.opensandbox_base_url,
+        execd_token=settings.execd_access_token,
         transport=sandbox.transport(),
+        execd_transport=execd_transport,
     )
     metrics = Metrics()
     archive = ArchiveService(settings=settings, ledger=ledger, client=client)

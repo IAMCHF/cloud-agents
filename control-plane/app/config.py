@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     sandbox_timeout_seconds: int = 3600
     sandbox_start_timeout_seconds: float = 90.0
     max_active_sessions: int = 24
+    # execd 直连（终端/文件）可选的访问 token；OpenSandbox 未启用鉴权时留空。
+    execd_access_token: str = ""
 
     # 沙箱出口策略：默认拒绝；白名单 target、target:port 或 [IPv6]:port（逗号分隔，
     # 裸 IP/CIDR 含 IPv6 不拆端口）。控制面/网关地址会自动加入白名单。

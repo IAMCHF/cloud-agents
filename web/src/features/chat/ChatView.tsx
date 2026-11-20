@@ -10,10 +10,26 @@ import type {
   ThreadSummary,
 } from "../../state/session";
 import { DiffView } from "../diff/DiffView";
+import { FilePanel } from "../terminal/FilePanel";
+import { TerminalPanel } from "../terminal/TerminalPanel";
 import { ApprovalActions, ApprovalCard } from "./ApprovalCard";
 import { MarkdownText } from "./MarkdownText";
 
-export function ChatView({ store }: { store: SessionStore }) {
+type RightPanel = "diff" | "terminal" | "files";
+
+export function ChatView({
+  store,
+  sessionId,
+  token,
+  wsOrigin,
+  httpOrigin,
+}: {
+  store: SessionStore;
+  sessionId?: string;
+  token?: string;
+  wsOrigin?: string;
+  httpOrigin?: string;
+}) {
   const status = useStore(store, (state) => state.status);
   const items = useStore(store, (state) => state.items);
   const approvals = useStore(store, (state) => state.approvals);
@@ -24,6 +40,7 @@ export function ChatView({ store }: { store: SessionStore }) {
   const plan = useStore(store, (state) => state.plan);
   const diff = useStore(store, (state) => state.diff);
   const [draft, setDraft] = useState("");
+  const [panel, setPanel] = useState<RightPanel>("diff");
 
   const submit = () => {
     const text = draft.trim();
@@ -164,12 +181,41 @@ export function ChatView({ store }: { store: SessionStore }) {
         </div>
 
         <aside className="hidden w-[42%] shrink-0 flex-col border-l border-border lg:flex">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <span className="text-xs font-semibold text-muted">Diff</span>
-            <span className="text-[11px] text-muted">{turnId === null ? "上一轮" : "本轮"}</span>
+          <div className="flex items-center gap-1 border-b border-border px-3 py-2 text-xs">
+            {(["diff", "terminal", "files"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={`rounded px-2 py-1 ${
+                  panel === item
+                    ? "bg-surface-raised text-foreground"
+                    : "text-muted hover:text-foreground"
+                }`}
+                onClick={() => {
+                  setPanel(item);
+                }}
+              >
+                {item === "diff" ? "Diff" : item === "terminal" ? "终端" : "文件"}
+              </button>
+            ))}
+            <span className="ml-auto text-[11px] text-muted">
+              {turnId === null ? "上一轮" : "本轮"}
+            </span>
           </div>
           <div className="min-h-0 flex-1">
-            <DiffView diff={diff} />
+            {panel === "diff" ? (
+              <DiffView diff={diff} />
+            ) : panel === "terminal" ? (
+              sessionId !== undefined && token !== undefined && wsOrigin !== undefined ? (
+                <TerminalPanel sessionId={sessionId} token={token} wsOrigin={wsOrigin} />
+              ) : (
+                <p className="p-4 text-xs text-muted">会话未连接，终端不可用。</p>
+              )
+            ) : sessionId !== undefined && token !== undefined && httpOrigin !== undefined ? (
+              <FilePanel sessionId={sessionId} token={token} httpOrigin={httpOrigin} />
+            ) : (
+              <p className="p-4 text-xs text-muted">会话未连接，文件树不可用。</p>
+            )}
           </div>
         </aside>
       </div>

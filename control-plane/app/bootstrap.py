@@ -52,6 +52,7 @@ async def build_components(settings: Settings, hub: SessionHub) -> Components:
     client = OpenSandboxClient(
         base_url=settings.opensandbox_base_url,
         api_key=settings.opensandbox_api_key,
+        execd_token=settings.execd_access_token,
     )
     metrics = Metrics()
     manager = SandboxManager(

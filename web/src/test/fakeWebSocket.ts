@@ -12,14 +12,14 @@ export class FakeWebSocket {
   readyState = 0;
   readonly sent: string[] = [];
   url: string;
-  private readonly listeners = new Map<string, Set<(event: { data?: string }) => void>>();
+  private readonly listeners = new Map<string, Set<(event: { data?: unknown }) => void>>();
 
   constructor(url: string) {
     this.url = url;
     FakeWebSocket.instances.push(this);
   }
 
-  addEventListener(type: string, listener: (event: { data?: string }) => void): void {
+  addEventListener(type: string, listener: (event: { data?: unknown }) => void): void {
     const set = this.listeners.get(type) ?? new Set();
     set.add(listener);
     this.listeners.set(type, set);
@@ -43,7 +43,11 @@ export class FakeWebSocket {
     this.dispatch("message", { data: payload });
   }
 
-  private dispatch(type: string, event: { data?: string }): void {
+  messageBytes(payload: ArrayBuffer): void {
+    this.dispatch("message", { data: payload });
+  }
+
+  private dispatch(type: string, event: { data?: unknown }): void {
     for (const listener of this.listeners.get(type) ?? []) {
       listener(event);
     }

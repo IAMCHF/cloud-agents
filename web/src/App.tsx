@@ -89,7 +89,16 @@ function ChatSession({ link }: { link: { url: string; sessionId: string; token: 
   if (runtime === null) {
     return <p className="p-8 text-sm text-muted">正在连接云端会话…</p>;
   }
-  return <ChatView store={runtime.store} />;
+  const origin = new URL(link.url).origin;
+  return (
+    <ChatView
+      store={runtime.store}
+      sessionId={link.sessionId}
+      token={link.token}
+      wsOrigin={origin}
+      httpOrigin={origin.replace(/^ws/, "http")}
+    />
+  );
 }
 
 function readSessionLink(): { url: string; sessionId: string; token: string } | null {

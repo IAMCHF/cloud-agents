@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -68,10 +69,14 @@ class OpenSandboxClient:
         *,
         base_url: str,
         api_key: str = "",
+        execd_token: str = "",
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        execd_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         headers = {"OPEN-SANDBOX-API-KEY": api_key} if api_key else {}
+        self._execd_token = execd_token
+        self._execd_transport = execd_transport
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers=headers,
@@ -144,6 +149,78 @@ class OpenSandboxClient:
                 f"代理请求失败 HTTP {response.status_code}: {response.text[:200]}"
             )
         return response.text
+
+    async def endpoint(self, sandbox_id: str, port: int) -> str:
+        response = await self._client.get(f"/v1/sandboxes/{sandbox_id}/endpoints/{port}")
+        payload = _expect(response, {200})
+        endpoint = payload.get("endpoint")
+        if not isinstance(endpoint, str) or endpoint == "":
+            raise OpenSandboxError("OpenSandbox endpoint 响应缺少 endpoint")
+        return endpoint
+
+    async def _execd_request(
+        self,
+        sandbox_id: str,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        timeout: float = 30.0,
+    ) -> httpx.Response:
+        endpoint = await self.endpoint(sandbox_id, 44772)
+        base_url = (
+            endpoint if endpoint.startswith(("http://", "https://")) else f"http://{endpoint}"
+        )
+        headers = {"X-EXECD-ACCESS-TOKEN": self._execd_token} if self._execd_token else {}
+        async with httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            headers=headers,
+            timeout=timeout,
+            transport=self._execd_transport,
+        ) as client:
+            return await client.request(method, path, params=params, json=json_body)
+
+    async def execd_list_directory(self, sandbox_id: str, path: str) -> list[dict[str, Any]]:
+        response = await self._execd_request(
+            sandbox_id, "GET", "/directories/list", params={"path": path}
+        )
+        if response.status_code != 200:
+            raise OpenSandboxError(f"列目录失败 HTTP {response.status_code}: {response.text[:200]}")
+        payload: Any = response.json()
+        if not isinstance(payload, list):
+            raise OpenSandboxError("列目录响应不是数组")
+        return [item for item in payload if isinstance(item, dict)]
+
+    async def execd_read_file(
+        self, sandbox_id: str, path: str, *, max_bytes: int = 512 * 1024
+    ) -> bytes:
+        response = await self._execd_request(
+            sandbox_id, "GET", "/files/download", params={"path": path}, timeout=60.0
+        )
+        if response.status_code != 200:
+            raise OpenSandboxError(
+                f"读取文件失败 HTTP {response.status_code}: {response.text[:200]}"
+            )
+        content = response.content
+        if len(content) > max_bytes:
+            raise OpenSandboxError(f"文件超过预览上限 {max_bytes} 字节")
+        return content
+
+    async def execd_create_pty(self, sandbox_id: str) -> str:
+        response = await self._execd_request(sandbox_id, "POST", "/pty", json_body={})
+        if response.status_code not in {200, 201}:
+            raise OpenSandboxError(
+                f"创建终端失败 HTTP {response.status_code}: {response.text[:200]}"
+            )
+        payload: Any = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("session_id"), str):
+            raise OpenSandboxError("终端创建响应缺少 session_id")
+        return str(payload["session_id"])
+
+    async def execd_delete_pty(self, sandbox_id: str, pty_id: str) -> None:
+        with contextlib.suppress(OpenSandboxError):
+            await self._execd_request(sandbox_id, "DELETE", f"/pty/{pty_id}")
 
     async def wait_until_running(
         self,

@@ -2,6 +2,7 @@
 
 import { File, Folder, FolderUp } from "lucide-react";
 import { useEffect, useState } from "react";
+import { errorMessage, toMessage } from "../../api/errors";
 
 interface FileEntry {
   path: string;
@@ -181,17 +182,4 @@ function formatSize(size: number): string {
     return `${(size / 1024).toFixed(1)}K`;
   }
   return `${(size / 1024 / 1024).toFixed(1)}M`;
-}
-
-async function errorMessage(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { detail?: string };
-    return body.detail ?? `请求失败：${response.status}`;
-  } catch {
-    return `请求失败：${response.status}`;
-  }
-}
-
-function toMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

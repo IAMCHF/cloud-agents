@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     max_active_sessions: int = 24
     # execd 直连（终端/文件）可选的访问 token；OpenSandbox 未启用鉴权时留空。
     execd_access_token: str = ""
+    # 应用预览：子域反代 `<session>--<port>.preview.<base>`；base 留空禁用。
+    # 票据密钥留空时回落到 P1_AUTH_TOKEN（开发方便），生产应显式配置。
+    preview_base_domain: str = ""
+    preview_token_secret: str = ""
+    preview_token_ttl_seconds: int = 3600
 
     # 沙箱出口策略：默认拒绝；白名单 target、target:port 或 [IPv6]:port（逗号分隔，
     # 裸 IP/CIDR 含 IPv6 不拆端口）。控制面/网关地址会自动加入白名单。

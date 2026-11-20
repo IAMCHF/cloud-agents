@@ -14,11 +14,11 @@ class FakeOpenSandbox:
         *,
         state: str = "Running",
         sandbox_id: str = "sb-1",
-        endpoint: str = "execd.test:44772",
+        endpoint_host: str = "execd.test",
     ) -> None:
         self.state = state
         self.sandbox_id = sandbox_id
-        self.endpoint = endpoint
+        self.endpoint_host = endpoint_host
         self.created: list[dict[str, Any]] = []
         self.deleted: list[str] = []
         self.resumed: list[str] = []
@@ -46,6 +46,9 @@ class FakeOpenSandbox:
             self.resumed.append(self.sandbox_id)
             self.state = "Running"
             return httpx.Response(202)
-        if request.method == "GET" and path == f"/v1/sandboxes/{self.sandbox_id}/endpoints/44772":
-            return httpx.Response(200, json={"endpoint": self.endpoint})
+        if request.method == "GET" and path.startswith(
+            f"/v1/sandboxes/{self.sandbox_id}/endpoints/"
+        ):
+            port = path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json={"endpoint": f"{self.endpoint_host}:{port}"})
         return httpx.Response(404, json={"error": "not found"})

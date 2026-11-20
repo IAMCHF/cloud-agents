@@ -23,6 +23,8 @@ data:
   ARCHIVE_TIMEOUT_SECONDS: "600"
   SANDBOX_NETWORK_DEFAULT_ACTION: deny
   SANDBOX_EGRESS_ALLOW: ""
+  # 应用预览：子域反代 `<session>--<port>.preview.<base>`；生产换成通配 DNS 的预览域。
+  PREVIEW_BASE_DOMAIN: 127.0.0.1.nip.io
   SANDBOX_CPU: "1"
   SANDBOX_MEMORY: 1Gi
   SANDBOX_TIMEOUT_SECONDS: "3600"

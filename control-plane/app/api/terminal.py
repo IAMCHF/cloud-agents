@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 from typing import Any
@@ -16,8 +15,9 @@ from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSock
 from fastapi.responses import PlainTextResponse
 from starlette.websockets import WebSocketState
 
-from app.bootstrap import Components
-from app.bridge.hub import CLOSE_CONFLICT, CLOSE_UNAUTHORIZED, SessionHub
+from app.api.common import components_from, hub_from, running_record_by_token
+from app.api.wsrelay import relay_websockets
+from app.bridge.hub import CLOSE_CONFLICT, CLOSE_UNAUTHORIZED
 from app.sandbox import OpenSandboxError
 
 logger = logging.getLogger(__name__)
@@ -27,34 +27,13 @@ router = APIRouter(prefix="/api/sessions", tags=["terminal"])
 _EXECD_PORT = 44772
 
 
-def _components(request: Any) -> Components:
-    components = getattr(request.app.state, "components", None)
-    if not isinstance(components, Components):
-        raise HTTPException(status_code=503, detail="components not configured")
-    return components
-
-
-def _hub(websocket: Any) -> SessionHub:
-    hub = getattr(websocket.app.state, "bridge_hub", None)
-    if not isinstance(hub, SessionHub):
-        raise HTTPException(status_code=503, detail="bridge hub not configured")
-    return hub
-
-
-async def _running_record(
-    components: Components, hub: SessionHub, session_id: str, token: str
-) -> Any:
-    """按台账校验会话 token：多副本下文件/终端请求可落在任意实例。"""
-    if not token:
-        raise HTTPException(status_code=401, detail="session token invalid")
-    record = await components.ledger.find_session_by_token(token)
-    if record is None or record.session_id != session_id or record.status == "ended":
-        raise HTTPException(status_code=401, detail="session token invalid")
-    if record.status in {"creating", "running"}:
-        hub.ensure(session_id, token, record.owner)
-    if record.status != "running" or record.sandbox_id is None:
-        raise HTTPException(status_code=409, detail="会话未运行，请先恢复会话")
-    return record
+def _strip_execd_frames(data: bytes) -> bytes | None:
+    """execd PTY 二进制帧：0x01 数据去头，0x03 控制帧丢弃。"""
+    if data[:1] == b"\x01":
+        return data[1:]
+    if data[:1] == b"\x03":
+        return None
+    return data
 
 
 @router.get("/{session_id}/files")
@@ -64,8 +43,10 @@ async def list_files(
     token: str = Query(default=""),
     path: str = Query("/workspace"),
 ) -> dict[str, Any]:
-    components = _components(request)
-    record = await _running_record(components, _hub(request), session_id, token)
+    components = components_from(request)
+    record = await running_record_by_token(components, hub_from(request), session_id, token)
+    if record.sandbox_id is None:  # pragma: no cover - 由 running_record_by_token 保证
+        raise HTTPException(status_code=409, detail="会话未运行，请先恢复会话")
     try:
         entries = await components.client.execd_list_directory(record.sandbox_id, path)
     except OpenSandboxError as exc:
@@ -80,8 +61,10 @@ async def read_file(
     token: str = Query(default=""),
     path: str = Query(...),
 ) -> PlainTextResponse:
-    components = _components(request)
-    record = await _running_record(components, _hub(request), session_id, token)
+    components = components_from(request)
+    record = await running_record_by_token(components, hub_from(request), session_id, token)
+    if record.sandbox_id is None:  # pragma: no cover - 由 running_record_by_token 保证
+        raise HTTPException(status_code=409, detail="会话未运行，请先恢复会话")
     try:
         content = await components.client.execd_read_file(record.sandbox_id, path)
     except OpenSandboxError as exc:
@@ -95,21 +78,27 @@ async def terminal_socket(
     session_id: str,
     token: str = Query(default=""),
 ) -> None:
-    hub = _hub(websocket)
-    components = _components(websocket)
+    hub = hub_from(websocket)
+    components = components_from(websocket)
     try:
-        record = await _running_record(components, hub, session_id, token)
+        record = await running_record_by_token(components, hub, session_id, token)
     except HTTPException as exc:
         await websocket.accept()
         code = CLOSE_UNAUTHORIZED if exc.status_code == 401 else CLOSE_CONFLICT
         await websocket.close(code=code, reason=str(exc.detail))
         return
 
+    sandbox_id = record.sandbox_id
+    if sandbox_id is None:  # pragma: no cover - 由 running_record_by_token 保证
+        await websocket.accept()
+        await websocket.close(code=CLOSE_CONFLICT, reason="session not running")
+        return
+
     await websocket.accept()
     pty_id: str | None = None
     try:
-        pty_id = await components.client.execd_create_pty(record.sandbox_id)
-        endpoint = await components.client.endpoint(record.sandbox_id, _EXECD_PORT)
+        pty_id = await components.client.execd_create_pty(sandbox_id)
+        endpoint = await components.client.endpoint(sandbox_id, _EXECD_PORT)
         base = endpoint if endpoint.startswith(("ws://", "wss://")) else f"ws://{endpoint}"
         headers = (
             {"X-EXECD-ACCESS-TOKEN": components.settings.execd_access_token}
@@ -123,7 +112,7 @@ async def terminal_socket(
             additional_headers=headers,
             max_size=None,
         ) as exec_ws:
-            await _bridge_terminal(websocket, exec_ws)
+            await relay_websockets(websocket, exec_ws, to_browser_bytes=_strip_execd_frames)
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -132,48 +121,5 @@ async def terminal_socket(
             with contextlib.suppress(Exception):
                 await websocket.close(code=1011)
     finally:
-        if pty_id is not None and record.sandbox_id is not None:
-            await components.client.execd_delete_pty(record.sandbox_id, pty_id)
-
-
-async def _bridge_terminal(websocket: WebSocket, exec_ws: Any) -> None:
-    async def browser_to_exec() -> None:
-        while True:
-            message = await websocket.receive()
-            if message["type"] == "websocket.disconnect":
-                return
-            text = message.get("text")
-            if text is not None:
-                await exec_ws.send(text)
-                continue
-            data = message.get("bytes")
-            if data is not None:
-                await exec_ws.send(data)
-
-    async def exec_to_browser() -> None:
-        async for message in exec_ws:
-            if isinstance(message, bytes):
-                if message[:1] == b"\x01":
-                    await websocket.send_bytes(message[1:])
-                elif message[:1] == b"\x03":
-                    continue
-                else:
-                    await websocket.send_bytes(message)
-            else:
-                await websocket.send_text(message)
-
-    tasks = [
-        asyncio.create_task(browser_to_exec(), name="terminal-browser"),
-        asyncio.create_task(exec_to_browser(), name="terminal-execd"),
-    ]
-    try:
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-        for task in done:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                task.result()
-    finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if pty_id is not None:
+            await components.client.execd_delete_pty(sandbox_id, pty_id)

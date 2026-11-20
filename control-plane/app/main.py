@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api.archive import router as archive_router
 from app.api.auth import router as auth_router
+from app.api.preview import router as preview_router
 from app.api.sessions import router as sessions_router
 from app.api.terminal import router as terminal_router
 from app.auth import OidcProvider
@@ -96,6 +97,9 @@ def create_app(
             return Response(status_code=503)
         components.metrics.observe_active_sessions(await components.ledger.active_count())
         return Response(content=components.metrics.render(), media_type=CONTENT_TYPE_LATEST)
+
+    # 预览含根路径 catch-all（按 Host 判定），必须最后注册，避免遮蔽 healthz/metrics 等路由。
+    app.include_router(preview_router)
 
     return app
 

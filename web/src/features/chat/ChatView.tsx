@@ -10,12 +10,13 @@ import type {
   ThreadSummary,
 } from "../../state/session";
 import { DiffView } from "../diff/DiffView";
+import { PreviewPanel } from "../preview/PreviewPanel";
 import { FilePanel } from "../terminal/FilePanel";
 import { TerminalPanel } from "../terminal/TerminalPanel";
 import { ApprovalActions, ApprovalCard } from "./ApprovalCard";
 import { MarkdownText } from "./MarkdownText";
 
-type RightPanel = "diff" | "terminal" | "files";
+type RightPanel = "diff" | "terminal" | "files" | "preview";
 
 export function ChatView({
   store,
@@ -182,7 +183,7 @@ export function ChatView({
 
         <aside className="hidden w-[42%] shrink-0 flex-col border-l border-border lg:flex">
           <div className="flex items-center gap-1 border-b border-border px-3 py-2 text-xs">
-            {(["diff", "terminal", "files"] as const).map((item) => (
+            {(["diff", "terminal", "files", "preview"] as const).map((item) => (
               <button
                 key={item}
                 type="button"
@@ -195,7 +196,7 @@ export function ChatView({
                   setPanel(item);
                 }}
               >
-                {item === "diff" ? "Diff" : item === "terminal" ? "终端" : "文件"}
+                {TAB_LABEL[item]}
               </button>
             ))}
             <span className="ml-auto text-[11px] text-muted">
@@ -211,10 +212,16 @@ export function ChatView({
               ) : (
                 <p className="p-4 text-xs text-muted">会话未连接，终端不可用。</p>
               )
+            ) : panel === "files" ? (
+              sessionId !== undefined && token !== undefined && httpOrigin !== undefined ? (
+                <FilePanel sessionId={sessionId} token={token} httpOrigin={httpOrigin} />
+              ) : (
+                <p className="p-4 text-xs text-muted">会话未连接，文件树不可用。</p>
+              )
             ) : sessionId !== undefined && token !== undefined && httpOrigin !== undefined ? (
-              <FilePanel sessionId={sessionId} token={token} httpOrigin={httpOrigin} />
+              <PreviewPanel sessionId={sessionId} token={token} httpOrigin={httpOrigin} />
             ) : (
-              <p className="p-4 text-xs text-muted">会话未连接，文件树不可用。</p>
+              <p className="p-4 text-xs text-muted">会话未连接，预览不可用。</p>
             )}
           </div>
         </aside>
@@ -304,6 +311,13 @@ function ApprovalRow({
     </ApprovalCard>
   );
 }
+
+const TAB_LABEL: Record<RightPanel, string> = {
+  diff: "Diff",
+  terminal: "终端",
+  files: "文件",
+  preview: "预览",
+};
 
 const STATUS_LABEL: Record<string, string> = {
   connecting: "连接中",

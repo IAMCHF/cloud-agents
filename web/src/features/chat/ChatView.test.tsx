@@ -134,6 +134,9 @@ describe("ChatView side panels", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "文件" }));
     expect(screen.getByText("会话未连接，文件树不可用。")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "预览" }));
+    expect(screen.getByText("会话未连接，预览不可用。")).toBeInTheDocument();
   });
 
   it("mounts the file panel when session credentials are available", async () => {
@@ -155,5 +158,8 @@ describe("ChatView side panels", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "文件" }));
     expect(await screen.findByText("空目录")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "预览" }));
+    expect(screen.getByText(/在终端里启动应用/)).toBeInTheDocument();
   });
 });

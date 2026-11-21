@@ -39,6 +39,11 @@
   kind 用 `PREVIEW_BASE_DOMAIN=127.0.0.1.nip.io` + catch-all Ingress；生产需通配 DNS
   `*.preview.<域>` 与对应 Ingress/TLS。`PREVIEW_TOKEN_SECRET` 留空回落到 `P1_AUTH_TOKEN`，
   生产建议单独配置。
+- **P4 控制面加固**：控制面 Pod 已设 `runAsNonRoot/runAsUser=1000/fsGroup=1000/seccomp=RuntimeDefault`，
+  容器 `readOnlyRootFilesystem=true` + `drop ALL` + `allowPrivilegeEscalation=false`，`/tmp` 为 emptyDir；
+  新增依赖写盘时挂载相应卷，勿关闭只读 rootfs。沙箱容器加固模板见
+  `sandbox/opensandbox/batchsandbox-template.yaml`（按容器名补 securityContext；OpenSandbox 的
+  privileged initContainer 与 egress sidecar `NET_ADMIN` 决定不能直接套 PSA `restricted`）。
 
 ## 1. 构建并加载镜像
 

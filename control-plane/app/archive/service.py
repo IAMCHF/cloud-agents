@@ -280,7 +280,7 @@ def _extract_tar(source: Path, destination: Path) -> None:
             target = (base / member.name).resolve()
             if target != base and base not in target.parents:
                 raise ArchiveError(f"归档包含不安全路径：{member.name}")
-        archive.extractall(base)
+        archive.extractall(base, filter="data")
 
 
 def _dir_size(path: Path) -> int:

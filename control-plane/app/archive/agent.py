@@ -41,7 +41,7 @@ def _extract(name: str, destination: pathlib.Path) -> None:
             target = (base / member.name).resolve()
             if target != base and base not in target.parents:
                 raise ValueError(f"unsafe tar member: {member.name}")
-        archive.extractall(base)
+        archive.extractall(base, filter="data")
 
 
 def _archive_mode() -> None:  # pragma: no cover - 仅在沙箱内运行

@@ -1,0 +1,46 @@
+# OpenSandbox BatchSandbox 模板：给沙箱容器补安全上下文（P4）
+#
+# 用法（由部署操作者执行，仓库不存集群地址）：
+# 1) 复制到执行机，按 OpenSandbox server 的实际路径挂载（或写入其 Pod 可读的 ConfigMap）。
+# 2) 在 opensandbox-server 的 config.toml 中设置：
+#      [kubernetes]
+#      batchsandbox_template_file = "/etc/opensandbox/batchsandbox-template.yaml"
+# 3) 重启 opensandbox-server，新建沙箱后用 `kubectl -n opensandbox get pod <id>-0 -o yaml`
+#    确认 sandbox 容器的 securityContext 已合并；若字段缺失，说明 server 版本不按 name 合并
+#    containers，需升级/改用集群级准入策略。
+#
+# 注意：
+# - OpenSandbox 生成的 Pod 含 privileged initContainer（拷贝 execd/bootstrap）与 egress
+#   sidecar（add NET_ADMIN），因此不能直接套用 Pod Security Admission `restricted`；
+#   本模板只加固 sandbox 业务容器，egress sidecar 保留其必需能力。
+# - readOnlyRootFilesystem 依赖 /tmp 可写：模板挂载 memory emptyDir；若业务需要写其它路径
+#   （如 ~/.cache），按需追加 emptyDir，或改回 false 并在文档记录原因。
+# - runAsUser/runAsGroup 必须与镜像内 agent（uid/gid 1000）一致；换镜像时同步修改。
+metadata:
+spec:
+  replicas: 1
+  template:
+    spec:
+      restartPolicy: Never
+      tolerations:
+        - operator: "Exists"
+      containers:
+        - name: sandbox
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi

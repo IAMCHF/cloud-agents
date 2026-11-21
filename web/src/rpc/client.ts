@@ -138,26 +138,52 @@ export class CodexRpcClient {
   }
 }
 
-/** 浏览器 WebSocket 传输：未 open 前排队，避免初始化请求丢失。 */
-export function createWebSocketTransport(url: string): RpcTransport {
-  const socket = new WebSocket(url);
+/** 浏览器 WebSocket 传输：未 open 前排队；握手失败（403/连接重置）自动退避重试。 */
+export function createWebSocketTransport(
+  url: string,
+  options: { retryDelayMs?: number; maxRetryDelayMs?: number } = {},
+): RpcTransport {
+  const baseDelay = options.retryDelayMs ?? 1000;
+  const maxDelay = options.maxRetryDelayMs ?? 15_000;
+  let socket: WebSocket;
+  let disposed = false;
+  let opened = false;
+  let retries = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let handlers: { onMessage: (payload: string) => void; onClose: () => void } = {
     onMessage: () => undefined,
     onClose: () => undefined,
   };
   const queue: string[] = [];
 
-  socket.addEventListener("open", () => {
-    for (const payload of queue.splice(0)) {
-      socket.send(payload);
-    }
-  });
-  socket.addEventListener("message", (event) => {
-    handlers.onMessage(String(event.data));
-  });
-  socket.addEventListener("close", () => {
-    handlers.onClose();
-  });
+  const connect = () => {
+    socket = new WebSocket(url);
+    socket.addEventListener("open", () => {
+      opened = true;
+      retries = 0;
+      for (const payload of queue.splice(0)) {
+        socket.send(payload);
+      }
+    });
+    socket.addEventListener("message", (event) => {
+      handlers.onMessage(String(event.data));
+    });
+    socket.addEventListener("close", () => {
+      if (disposed) {
+        handlers.onClose();
+        return;
+      }
+      if (!opened) {
+        // Ingress 滚动更新/哈希漂移时握手会被重置或 403；退避重连，直到 dispose。
+        const delay = Math.min(maxDelay, baseDelay * 2 ** retries);
+        retries += 1;
+        retryTimer = setTimeout(connect, delay);
+        return;
+      }
+      handlers.onClose();
+    });
+  };
+  connect();
 
   return {
     send(payload: string): void {
@@ -168,6 +194,11 @@ export function createWebSocketTransport(url: string): RpcTransport {
       }
     },
     close(): void {
+      disposed = true;
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       socket.close();
     },
     setHandlers(next): void {

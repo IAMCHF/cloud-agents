@@ -27,6 +27,21 @@ uv run --directory control-plane python ../bench/load.py resume --turns 10
 | `density` | N 路并发按占空比跑最小真实 turn；每沙箱 CPU/内存（docker stats，cgroup 口径）、turn 时延 p50/p95、实测忙碌占比、网关 `llm_requests` 增量 | `--sessions 8 --duration 180 --duty 0.3 --sample-interval 5` |
 | `resume` | ① 客户端断线重连+`thread/resume`（同沙箱）② OSB pause→resume→`thread/resume` ③ 冷恢复：K 轮历史落卷→销毁→新沙箱挂卷→**全新 codex 进程**磁盘回放+续聊 | `--turns 10` |
 
+## 控制面 150 路仿真（无需真实沙箱/模型）
+
+`sim_control_plane.py` 在进程内起「假 OpenSandbox + 控制面 + 假 OIDC」，为每个会话建立
+桥接 WS 与客户端 WS，驱动原生 JSON-RPC turn 与审批。验证 150 属主并发建会话、WSS 扇入/扇出、
+审批首响应、台账与 `/metrics` gauge。
+
+```sh
+uv run --directory control-plane python ../bench/sim_control_plane.py --sessions 150
+```
+
+结果 JSON 落 `.local/bench/control-plane-<N>-<时间戳>.json`；2026-11-21 实测 150/150 成功、
+turn p95 0.18s、gauge 150（见 `docs/tests/2026-11-21-P3-150路仿真与遗留验证.md`）。
+该脚本不覆盖真实 codex 进程、模型/网关、真实沙箱资源与 Ingress 粘性；这些分别由
+`density`/P1 记录与 D2 复跑覆盖。
+
 ## 口径与已知限制（读报告前必看）
 
 - **P1 单属主**：API 固定 `P1_OWNER` + 同用户单活跃准入，经 API 最多 1 个活跃会话。

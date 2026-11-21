@@ -119,6 +119,29 @@ describe("createWebSocketTransport", () => {
     transport.close();
     expect(closed).toBe(true);
   });
+
+  it("retries handshake failures with backoff and flushes queued frames", () => {
+    vi.useFakeTimers();
+    try {
+      const transport = createWebSocketTransport("ws://example/ws/session/s?token=t", {
+        retryDelayMs: 100,
+      });
+      transport.send("hello");
+      FakeWebSocket.instances[0]?.close();
+      expect(FakeWebSocket.instances).toHaveLength(1);
+
+      vi.advanceTimersByTime(100);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      FakeWebSocket.instances[1]?.open();
+      expect(FakeWebSocket.instances[1]?.sent).toEqual(["hello"]);
+
+      transport.close();
+      vi.advanceTimersByTime(1000);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("CodexRpcClient failure modes", () => {
